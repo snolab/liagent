@@ -347,6 +347,7 @@ effect.
 | `userAvatar`  | `string \| string[]`            | The user's picture on their own lines, URLs in fallback order (your app's avatar, then the provider's `user.image`).                                                                                                                                |
 | `userName`    | `string`                        | The user's name: the initial of their fallback avatar.                                                                                                                                                                                              |
 | `userId`      | `string`                        | A stable id, or its hash (never an email): the fallback avatar's colour.                                                                                                                                                                            |
+| `nodes`       | `string[]`                      | The state-tree nodes agents listen at (the hub's `state.nodes`): what typing `@/` offers.                                                                                                                                                           |
 
 **Methods:**
 
@@ -357,10 +358,15 @@ effect.
   ignored.
 - `speak(text)`: reads text aloud if the device has read-aloud on.
 - `submit()`: sends the draft now.
+- `setTarget(path)`: addresses the next lines to a state-tree node
+  (`"/"` = back to the main thread), shown as a removable chip; `target`
+  reads it. Meant for a state tree's selection. Typing `@/words › prefetch `
+  at the start of the input does the same.
 
 **Callbacks:**
 
-- `onSend(text) → boolean`
+- `onSend(text, to?) → boolean`: `to` is the state-tree node the line is
+  addressed to (absent = the main thread).
 - `onAnswer("allow" | "deny", pair, { pages?, scope? })`: `pages` holds the
   ticked page ids, or `"all"`. `scope` is `"chat"` only when an older agent's
   prompt was answered with the 30-day chat button.

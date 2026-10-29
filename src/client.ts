@@ -174,6 +174,7 @@ export function connectHub(box: ChatBox, opts: HubOptions): HubConnection {
           box.pending = (s.pending as PairInfo | null) ?? null;
           box.sessions = Array.isArray(s.sessions) ? s.sessions : [];
           box.listeners = s.listeners ?? box.sessions.length;
+          box.nodes = Array.isArray(s.nodes) ? s.nodes : [];
           box.pages = Array.isArray(s.pages) ? s.pages : [];
           const self = typeof s.self === "string" ? s.self : "";
           box.self = self;
@@ -231,7 +232,8 @@ export function connectHub(box: ChatBox, opts: HubOptions): HubConnection {
     else if (ws) idle = setTimeout(disconnect, IDLE_MS);
   };
 
-  box.onSend = (text) => send(ws, { type: "chat", id: crypto.randomUUID().slice(0, 12), text });
+  box.onSend = (text, to) =>
+    send(ws, { type: "chat", id: crypto.randomUUID().slice(0, 12), text, ...(to ? { to } : {}) });
   box.onAnswer = (type, p, answer) =>
     void send(
       ws,

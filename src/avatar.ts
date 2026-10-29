@@ -106,7 +106,8 @@ export function lineAvatar(
   },
 ): LineAvatar {
   if (m.from === "agent") {
-    const name = m.label || "agent";
+    // The node's assignee, when the line names one; else the agent's label.
+    const name = m.agentId || m.label || "agent";
     const a = opts.agentAvatar;
     const isSrc = typeof a === "string" || Array.isArray(a);
     return {

@@ -70,6 +70,18 @@
 // only the pages of its grant). Pages show a spinner while the last beat is
 // under BUSY_MS old and no reply came since; the hub keeps no busy state.
 //
+// Node paths. Messages are addressed to state-tree nodes ("/words/prefetch");
+// a node's assignee (an agent or a human) receives them. An agent listens at
+// a node with ?node=<path>&agent=<id> (absent = "/", the main thread, as
+// before). A line with `to: P` (the owner's "@/words …", or an agent's say to
+// "/…") reaches the agents at P, and every ancestor's as `observed: true` — the
+// root's sees everything; siblings and descendants never. An agent line
+// carries `taskPath` and `agentId`. An agent may address its own subtree and
+// any ancestor; anything else needs a node grant ({type:"grant", from, to})
+// from an agent whose node holds both (the root's always may), stored as
+// `ngrant:<from>><to>`, else {type:"error", reason:"out of scope: …"}. The
+// owner's pages see every line, whatever its node.
+//
 // No timers and no polling: expiry is checked whenever the next event
 // arrives. Storage keys match the hub this was ported from (owner thread
 // `seq`/`msg:<seq>`, friends `t:<id>:…`, `friend:<id>`, `grant:<hash>`), so
@@ -83,6 +95,13 @@ import {
   type ChatMessage,
   type HubState,
   MAX_LABEL,
+  type NodeGrant,
+  ROOT_NODE,
+  agentIdOf,
+  isWithin,
+  mayAddress,
+  nodePath,
+  routeTo,
   PAGES_GONE_MS,
   PENDING_MS,
   type PageInfo,
@@ -184,6 +203,10 @@ type ControllerAtt = {
   ip?: string;
   /** When the last page of its grant closed (pages it may reopen with the same id). */
   goneSince?: number;
+  /** The state-tree node this agent listens at (`?node=`); absent = "/". */
+  node?: string;
+  /** The node's assignee (`?agent=`): the agent's id on its lines. */
+  assignee?: string;
 } & PairInfo;
 /**
  * A stored grant (`grant:<sha256 of its token>`). `scope` absent = "chat"
@@ -232,6 +255,19 @@ const hex = (b: ArrayBuffer | Uint8Array) =>
 export const hashToken = async (token: string) =>
   hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)));
 const log = (o: Record<string, unknown>) => console.log(JSON.stringify(o));
+const nodeGrantKey = (from: string, to: string) => `ngrant:${from}>${to}`;
+/** Where an agent listens, from its knock: `?node=` (a node path) and `?agent=`. */
+const whereOf = (url: URL): { node?: string; assignee?: string } => {
+  const node = nodePath(url.searchParams.get("node") ?? undefined);
+  const assignee = agentIdOf(url.searchParams.get("agent") ?? undefined);
+  const out: { node?: string; assignee?: string } = {};
+  if (node && node !== ROOT_NODE) out.node = node;
+  if (assignee) out.assignee = assignee;
+  return out;
+};
+/** A history as one agent sees it: only the lines routed to its node. */
+const forNode = (list: ChatMessage[], node?: string) =>
+  node ? list.filter((m) => routeTo(node, m.to)) : list;
 /** Whose a socket is: a page's thread, or the audience a controller was paired for. */
 const audience = (a: Att) => (a.role === "page" ? a.thread : (a.forUser ?? OWNER_THREAD));
 const threadKeys = (thread: string) =>
@@ -430,13 +466,16 @@ export class ChatHub {
       label: a.label,
       at: a.at,
     }));
+    const agents = this.listeners(except);
+    const nodes = [...new Set(agents.map((c) => c.a.node).filter((n): n is string => !!n))].sort();
     return {
       type: "state",
       pending,
       sessions,
-      listeners: this.listeners(except).length,
+      listeners: agents.length,
       pages,
       self,
+      ...(nodes.length ? { nodes } : {}),
     };
   }
 
@@ -478,7 +517,21 @@ export class ChatHub {
     if (seq > CHAT_HISTORY) await this.ctx.storage.delete(msgKey(m.thread, seq - CHAT_HISTORY));
     const out = { type: "chat", message: m };
     for (const { ws, a } of this.pages(m.thread)) if (covers(only, a.id)) send(ws, out);
-    for (const { ws } of this.listeners()) send(ws, out);
+    // Agents by node: that node's, and its ancestors' as observers (the root's sees all).
+    for (const { ws, a } of this.listeners()) {
+      const route = routeTo(a.node, m.to);
+      if (route) send(ws, route === "observed" ? { ...out, observed: true } : out);
+    }
+  }
+
+  /** The live node grants (`ngrant:`), lapsed ones dropped as they are met. */
+  private async nodeGrants(): Promise<NodeGrant[]> {
+    const t = this.now();
+    const out: NodeGrant[] = [];
+    for (const [k, g] of await this.ctx.storage.list<NodeGrant>({ prefix: "ngrant:" }))
+      if (g.until > t) out.push(g);
+      else await this.ctx.storage.delete(k);
+    return out;
   }
 
   /** Everyone who has used the chat, most recent first. */
@@ -650,7 +703,7 @@ export class ChatHub {
       return close(ws, 4404, "no page");
     }
     if (!this.knockAllowed(ws, OWNER_THREAD, ip)) return;
-    this.knock(ws, { label, ...(want ? { want } : {}), ...(ip ? { ip } : {}) });
+    this.knock(ws, { label, ...(want ? { want } : {}), ...(ip ? { ip } : {}), ...whereOf(url) });
   }
 
   /** Make room for one audience's pairing: false (and `ws` closed) if one is still waiting. */
@@ -671,7 +724,15 @@ export class ChatHub {
 
   private knock(
     ws: Socket,
-    extra: { label: string; forUser?: string; forEmail?: string; want?: Scope; ip?: string },
+    extra: {
+      label: string;
+      forUser?: string;
+      forEmail?: string;
+      want?: Scope;
+      ip?: string;
+      node?: string;
+      assignee?: string;
+    },
   ) {
     const a: ControllerAtt = {
       role: "controller",
@@ -754,10 +815,11 @@ export class ChatHub {
       scope,
       grant: hash,
       pages,
+      ...whereOf(url),
     };
     ws.serializeAttachment(a);
     send(ws, { type: "approved", until: g.until, scope, pages, resumed: true });
-    send(ws, { type: "history", messages: await this.history() });
+    send(ws, { type: "history", messages: forNode(await this.history(), a.node) });
     log({ msg: "chat.resume", pair: a.pair, label: a.label, scope });
     this.broadcast();
   }
@@ -789,6 +851,7 @@ export class ChatHub {
         text: m.text,
         at: t,
         thread: OWNER_THREAD,
+        ...(m.to ? { to: m.to } : {}),
       });
     }
     if (m.type === "page") return this.relabel(ws, page, m.label);
@@ -1008,7 +1071,7 @@ export class ChatHub {
       this.broadcast();
       // A pairing for a friend is eval only: it is handed no chat.
       if (a.forUser) return;
-      return send(ws, { type: "history", messages: await this.history() });
+      return send(ws, { type: "history", messages: forNode(await this.history(), a.node) });
     }
     const until = t + EVAL_GRANT_MS;
     const token = hex(crypto.getRandomValues(new Uint8Array(32)));
@@ -1024,7 +1087,7 @@ export class ChatHub {
     send(ws, { type: "approved", until, scope: "eval", pages, token });
     log({ msg: "chat.allow", pair: a.pair, label: a.label, until, scope: "eval" });
     this.broadcast();
-    send(ws, { type: "history", messages: await this.history() });
+    send(ws, { type: "history", messages: forNode(await this.history(), a.node) });
   }
 
   /** "Allow chat for 30 days": chat only, with a grant token the agent can resume with. */
@@ -1043,7 +1106,7 @@ export class ChatHub {
     send(ws, { type: "approved", until, scope: "chat", pages, token });
     log({ msg: "chat.allow", pair: a.pair, label: a.label, until, scope: "chat" });
     this.broadcast();
-    send(ws, { type: "history", messages: await this.history() });
+    send(ws, { type: "history", messages: forNode(await this.history(), a.node) });
   }
 
   /** Deny a pairing, or End a session — and with it the grant behind it, on every socket using it. */
@@ -1077,6 +1140,33 @@ export class ChatHub {
     return { thread: f.userId, email: f.email };
   }
 
+  /**
+   * A node grant: senders within `from` may address nodes within `to`, for
+   * `ms` (EVAL_GRANT_MS by default). Only an agent whose node holds both may
+   * grant it or take it back; the root's always may.
+   */
+  private async nodeGrant(
+    ws: Socket,
+    c: ControllerAtt,
+    m: { type: "grant" | "ungrant"; from: string; to: string; ms?: number },
+  ) {
+    const home = c.node ?? ROOT_NODE;
+    if (!isWithin(m.from, home) || !isWithin(m.to, home)) {
+      const reason = `out of scope: an agent at ${home} cannot grant ${m.from} → ${m.to}`;
+      return send(ws, { type: "error", error: reason, reason });
+    }
+    const key = nodeGrantKey(m.from, m.to);
+    if (m.type === "ungrant") {
+      await this.ctx.storage.delete(key);
+      log({ msg: "chat.node-ungrant", from: m.from, to: m.to });
+      return send(ws, { type: "ungranted", from: m.from, to: m.to });
+    }
+    const until = this.now() + (m.ms ?? EVAL_GRANT_MS);
+    await this.ctx.storage.put(key, { from: m.from, to: m.to, until } satisfies NodeGrant);
+    log({ msg: "chat.node-grant", from: m.from, to: m.to, until, by: home });
+    send(ws, { type: "granted", from: m.from, to: m.to, until });
+  }
+
   private fromController(ws: Socket, c: ControllerAtt, raw: unknown): void | Promise<void> {
     const t = this.now();
     if (!c.until) return send(ws, { type: "error", error: "not approved yet" });
@@ -1098,12 +1188,33 @@ export class ChatHub {
           if (dest.thread !== OWNER_THREAD || covers(c.pages, p.a.id)) send(p.ws, beat);
       });
     }
+    if (m.value.type === "grant" || m.value.type === "ungrant") {
+      if (c.forUser)
+        return send(ws, { type: "error", error: "a pairing for a friend cannot chat" });
+      return this.nodeGrant(ws, c, m.value);
+    }
     if (m.value.type === "say") {
       if (c.forUser)
         return send(ws, { type: "error", error: "a pairing for a friend cannot chat" });
-      const { text, to } = m.value;
-      return this.sayTarget(to).then(async (dest) => {
+      const { text, to, node, agentId } = m.value;
+      // The sender's node: what the line says, within the node its socket listens at.
+      const home = c.node ?? ROOT_NODE;
+      const from = m.value.taskPath ?? home;
+      if (!isWithin(from, home)) {
+        const reason = `taskPath ${from} is outside this agent's node ${home}`;
+        return send(ws, { type: "error", error: reason, reason });
+      }
+      if (node && to) {
+        const reason = "address a thread or a node, not both";
+        return send(ws, { type: "error", error: reason, reason });
+      }
+      const scoped = node
+        ? this.nodeGrants().then((grants) => mayAddress(from, node, grants, t))
+        : Promise.resolve({ ok: true as const });
+      return Promise.all([scoped, this.sayTarget(to)]).then(async ([scope, dest]) => {
+        if (!scope.ok) return send(ws, { type: "error", error: scope.error, reason: scope.error });
         if ("error" in dest) return send(ws, { type: "error", error: dest.error });
+        const who = agentId ?? c.assignee;
         const said: ChatMessage & { thread: string; email?: string } = {
           id: crypto.randomUUID().slice(0, 8),
           from: "agent",
@@ -1111,6 +1222,9 @@ export class ChatHub {
           text,
           at: t,
           ...dest,
+          ...(from !== ROOT_NODE ? { taskPath: from } : {}),
+          ...(who ? { agentId: who } : {}),
+          ...(node ? { to: node } : {}),
         };
         log({
           msg: "chat.say",
