@@ -23,15 +23,34 @@ test("the grants file is 0600 in a 0700 directory, from its first write", () => 
   expect(mode(file)).toBe(0o600);
 });
 
-test("an existing loose directory and file are tightened", () => {
+test("the CLI's own directory is tightened even if it existed; an existing file is tightened", () => {
   const dir = join(root, "loose");
   mkdirSync(dir, { mode: 0o755 });
   chmodSync(dir, 0o755);
   const file = join(dir, "grants.json");
   writeFileSync(file, "{}", { mode: 0o644 });
   chmodSync(file, 0o644);
-  grantStore(file).save("h", "chat", "t", Date.now());
+  grantStore(file, true).save("h", "chat", "t", Date.now());
   expect(mode(dir)).toBe(0o700);
+  expect(mode(file)).toBe(0o600);
+});
+
+test("a custom path's existing folder keeps its mode; a folder we create is 0700", () => {
+  const shared = join(root, "shared");
+  mkdirSync(shared, { mode: 0o755 });
+  chmodSync(shared, 0o755);
+  grantStore(join(shared, "grants.json")).save("h", "chat", "t", Date.now());
+  expect(mode(shared)).toBe(0o755);
+  expect(mode(join(shared, "grants.json"))).toBe(0o600);
+  grantStore(join(shared, "made", "grants.json")).save("h", "chat", "t", Date.now());
+  expect(mode(join(shared, "made"))).toBe(0o700);
+});
+
+test("an existing 0644 file ends up 0600 (privateWrite tightens it before writing)", () => {
+  const file = join(root, "old.json");
+  writeFileSync(file, "{}", { mode: 0o644 });
+  chmodSync(file, 0o644);
+  grantStore(file).save("h", "chat", "t", Date.now());
   expect(mode(file)).toBe(0o600);
 });
 

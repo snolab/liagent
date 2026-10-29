@@ -9,22 +9,36 @@ import { dirname, join } from "node:path";
 export type Scope = "chat" | "eval";
 type Grants = Record<string, { token: string; until: string }>;
 
-/** Create `dir` (and parents) 0700, and tighten it if it already existed. */
-export function privateDir(dir: string) {
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  chmodSync(dir, 0o700);
+/**
+ * Create `dir` (and parents) 0700. An existing directory is left alone
+ * unless `tighten` (the CLI's own ~/.config/liagent, which older versions
+ * created 0755): a custom $LIAGENT_GRANTS may sit in $HOME or /tmp, whose
+ * mode is not ours to change.
+ */
+export function privateDir(dir: string, tighten = false) {
+  const created = mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (created !== undefined || tighten) chmodSync(dir, 0o700);
 }
 
-/** Write `text` to `path` as 0600, created that way (and tightened if it existed). */
+/**
+ * Write `text` to `path` as 0600. A file that already exists (left 0644 by an
+ * older version) is tightened before the write, so the new content is never
+ * readable by others, even for a moment.
+ */
 export function privateWrite(path: string, text: string) {
+  try {
+    chmodSync(path, 0o600);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
   writeFileSync(path, text, { mode: 0o600 });
-  chmodSync(path, 0o600);
 }
 
 /** One grant per hub and scope: chat keys are the hub URL alone (as before), eval ones "<hub> eval". */
 const grantKey = (hub: string, scope: Scope) => (scope === "chat" ? hub : `${hub} eval`);
 
-export function grantStore(file: string) {
+/** `ownDir`: the directory is the CLI's own (the default path), so tighten it even if it exists. */
+export function grantStore(file: string, ownDir = false) {
   const read = (): Grants => {
     try {
       return JSON.parse(readFileSync(file, "utf8")) as Grants;
@@ -33,7 +47,7 @@ export function grantStore(file: string) {
     }
   };
   const write = (g: Grants) => {
-    privateDir(dirname(file));
+    privateDir(dirname(file), ownDir);
     privateWrite(file, JSON.stringify(g, null, 2));
   };
   return {
@@ -52,8 +66,8 @@ export function grantStore(file: string) {
 }
 
 /** Save a long message to `<dir>/<id>.txt` (0600 in a 0700 dir) and return the path. */
-export function spillTo(dir: string, id: string, text: string): string {
-  privateDir(dir);
+export function spillTo(dir: string, id: string, text: string, ownDir = false): string {
+  privateDir(dir, ownDir);
   const path = join(dir, `${id.replace(/[^A-Za-z0-9_-]/g, "_")}.txt`);
   privateWrite(path, text);
   return path;

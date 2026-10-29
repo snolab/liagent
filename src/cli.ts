@@ -94,7 +94,9 @@ function takeHub(): string {
 
 // ---- grants -----------------------------------------------------------------
 
-const grants = grantStore(GRANTS);
+/** The default location is ours to tighten; a custom $LIAGENT_GRANTS's folder is not. */
+const ownGrantsDir = !process.env.LIAGENT_GRANTS;
+const grants = grantStore(GRANTS, ownGrantsDir);
 const loadToken = grants.load;
 const saveToken = grants.save;
 const forgetToken = grants.forget;
@@ -300,7 +302,7 @@ function agentStatus(to: string): string | undefined {
 
 const INBOX = join(dirname(GRANTS), "inbox");
 
-const spillToInbox = (id: string, text: string) => spillTo(INBOX, id, text);
+const spillToInbox = (id: string, text: string) => spillTo(INBOX, id, text, ownGrantsDir);
 
 /**
  * Deliver one message into an agent-yes agent. --force: the owner named the
