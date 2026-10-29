@@ -153,6 +153,8 @@ export const IDENTITY_HEADERS = {
   email: "x-liagent-email",
   owner: "x-liagent-owner",
 } as const;
+/** The agent's client IP, set by routeChat from cf-connecting-ip (never by the client). */
+export const IP_HEADER = "x-liagent-ip";
 /** The header an agent resumes its chat grant with. */
 export const TOKEN_HEADER = "x-liagent-token";
 
@@ -176,6 +178,8 @@ type ControllerAtt = {
   forUser?: string;
   forEmail?: string;
   want?: Scope;
+  /** The client IP it knocked from (routeChat's IP_HEADER), for the pairing limits. */
+  ip?: string;
   /** When the last page of its grant closed (pages it may reopen with the same id). */
   goneSince?: number;
 } & PairInfo;
@@ -233,14 +237,20 @@ const threadKeys = (thread: string) =>
 const msgKey = (thread: string, seq: number) =>
   `${threadKeys(thread).prefix}${String(seq).padStart(12, "0")}`;
 const friendKey = (userId: string) => `friend:${userId}`;
+/** The pairing limits' keys: one per (audience, client IP), and one per audience. */
+const knockKey = (who: string, ip?: string) => (ip === undefined ? `${who}\n*` : `${who}\n${ip}`);
 /** After the user denies a pairing, that audience takes no new request for this long. */
 export const PAIR_COOLDOWN_MS = 60_000;
 /**
- * At most PAIR_MAX pairing requests per audience per PAIR_WINDOW_MS. A
- * request waits up to PENDING_MS (2 min), so the window must be longer than
- * PAIR_MAX of those, or re-knocking as each lapses would never hit the cap.
+ * At most PAIR_MAX pairing requests per audience and client IP per
+ * PAIR_WINDOW_MS, and PAIR_AUDIENCE_MAX per audience from all IPs together
+ * (which bounds the prompts the user sees). Keyed by IP too, so a stranger
+ * using up their own quota cannot lock the user's agent out. A request waits
+ * up to PENDING_MS (2 min), so the window must be longer than PAIR_MAX of
+ * those, or re-knocking as each lapses would never hit the cap.
  */
 export const PAIR_MAX = 3;
+export const PAIR_AUDIENCE_MAX = 10;
 export const PAIR_WINDOW_MS = 15 * 60_000;
 /** A friend's page may relabel at most once per this long; faster ones are dropped. */
 export const FRIEND_RELABEL_MS = 1_000;
@@ -283,22 +293,32 @@ export class ChatHub {
    */
   private knocks = new Map<string, { start: number; count: number; deniedAt?: number }>();
 
-  /** Room for one more pairing request for `who`: false (and `ws` closed with 4429) if not. */
-  private knockAllowed(ws: Socket, who: string) {
+  /**
+   * Room for one more pairing request for audience `who` from client `ip`:
+   * false (and `ws` closed with 4429) if not. Per (audience, IP): a
+   * cooldown after the user denied that IP's request, and PAIR_MAX per
+   * window. Per audience: PAIR_AUDIENCE_MAX per window from all IPs. Without
+   * an IP (a hub not behind routeChat on Cloudflare), every request shares
+   * one key.
+   */
+  private knockAllowed(ws: Socket, who: string, ip = "?") {
     const t = this.now();
-    let k = this.knocks.get(who) ?? { start: t, count: 0 };
-    if (k.deniedAt && t - k.deniedAt < PAIR_COOLDOWN_MS) {
+    const fresh = (k?: { start: number; count: number; deniedAt?: number }) =>
+      !k || t - k.start >= PAIR_WINDOW_MS ? { start: t, count: 0, deniedAt: k?.deniedAt } : k;
+    const mine = fresh(this.knocks.get(knockKey(who, ip)));
+    const all = fresh(this.knocks.get(knockKey(who)));
+    if (mine.deniedAt && t - mine.deniedAt < PAIR_COOLDOWN_MS) {
       send(ws, { type: "error", error: "a pairing was just denied: try again in a minute" });
       close(ws, 4429, "pairing cooling down");
       return false;
     }
-    if (t - k.start >= PAIR_WINDOW_MS) k = { start: t, count: 0, deniedAt: k.deniedAt };
-    if (k.count >= PAIR_MAX) {
+    if (mine.count >= PAIR_MAX || all.count >= PAIR_AUDIENCE_MAX) {
       send(ws, { type: "error", error: "too many pairing requests: try again later" });
       close(ws, 4429, "pairing rate limit");
       return false;
     }
-    this.knocks.set(who, { ...k, count: k.count + 1 });
+    this.knocks.set(knockKey(who, ip), { ...mine, count: mine.count + 1 });
+    this.knocks.set(knockKey(who), { ...all, count: all.count + 1 });
     return true;
   }
   private loadingGrants?: Promise<void>;
@@ -466,7 +486,13 @@ export class ChatHub {
     const pair = new WebSocketPair();
     const ws = pair[1];
     this.ctx.acceptWebSocket(ws);
-    if (control) await this.connectController(ws, url, req.headers.get(TOKEN_HEADER));
+    if (control)
+      await this.connectController(
+        ws,
+        url,
+        req.headers.get(TOKEN_HEADER),
+        req.headers.get(IP_HEADER) ?? undefined,
+      );
     else await this.connectPage(ws, url, who);
     return new Response(null, { status: 101, webSocket: pair[0] } as ResponseInit);
   }
@@ -578,9 +604,9 @@ export class ChatHub {
    * in chat scope at once. Otherwise it waits for the owner: one pending
    * pairing per audience, and only with a page to ask.
    */
-  async connectController(ws: Socket, url: URL, token?: string | null) {
+  async connectController(ws: Socket, url: URL, token?: string | null, ip?: string) {
     const forKey = url.searchParams.get("for")?.trim();
-    if (forKey) return this.pairForFriend(ws, url, forKey, token);
+    if (forKey) return this.pairForFriend(ws, url, forKey, token, ip);
     if (token) return this.resume(ws, url, token);
     const label = cleanLabel(url.searchParams.get("label"), 80) || "unnamed agent";
     const sc = url.searchParams.get("scope");
@@ -594,8 +620,8 @@ export class ChatHub {
       send(ws, { type: "error", error: "no owner page is open to approve this" });
       return close(ws, 4404, "no page");
     }
-    if (!this.knockAllowed(ws, OWNER_THREAD)) return;
-    this.knock(ws, want ? { label, want } : { label });
+    if (!this.knockAllowed(ws, OWNER_THREAD, ip)) return;
+    this.knock(ws, { label, ...(want ? { want } : {}), ...(ip ? { ip } : {}) });
   }
 
   /** Make room for one audience's pairing: false (and `ws` closed) if one is still waiting. */
@@ -616,7 +642,7 @@ export class ChatHub {
 
   private knock(
     ws: Socket,
-    extra: { label: string; forUser?: string; forEmail?: string; want?: Scope },
+    extra: { label: string; forUser?: string; forEmail?: string; want?: Scope; ip?: string },
   ) {
     const a: ControllerAtt = {
       role: "controller",
@@ -641,7 +667,13 @@ export class ChatHub {
   }
 
   /** An eval pairing on one friend's pages: the owner's agent asks, the friend answers. */
-  private async pairForFriend(ws: Socket, url: URL, key: string, token?: string | null) {
+  private async pairForFriend(
+    ws: Socket,
+    url: URL,
+    key: string,
+    token?: string | null,
+    ip?: string,
+  ) {
     if (!this.opts.eval) {
       send(ws, { type: "error", error: "eval is not enabled on this hub" });
       return close(ws, 4403, "no eval");
@@ -661,12 +693,13 @@ export class ChatHub {
       send(ws, { type: "error", error: `no page of ${f.email} is open` });
       return close(ws, 4404, "no page");
     }
-    if (!this.knockAllowed(ws, f.userId)) return;
+    if (!this.knockAllowed(ws, f.userId, ip)) return;
     this.knock(ws, {
       label: cleanLabel(url.searchParams.get("label"), 80) || live.g.label,
       forUser: f.userId,
       forEmail: f.email,
       want: "eval",
+      ...(ip ? { ip } : {}),
     });
   }
 
@@ -987,9 +1020,10 @@ export class ChatHub {
   /** Deny a pairing, or End a session — and with it the grant behind it, on every socket using it. */
   private end(kind: "deny" | "revoke", ws: Socket, a: ControllerAtt): void | Promise<void> {
     if (kind === "deny") {
-      const who = audience(a);
+      // The cooldown is for the IP that knocked, not for everyone.
+      const key = knockKey(audience(a), a.ip ?? "?");
       const t = this.now();
-      this.knocks.set(who, { ...(this.knocks.get(who) ?? { start: t, count: 0 }), deniedAt: t });
+      this.knocks.set(key, { ...(this.knocks.get(key) ?? { start: t, count: 0 }), deniedAt: t });
     }
     const targets = a.grant
       ? this.sockets("controller").filter((c) => c.a.grant === a.grant)
@@ -1169,11 +1203,16 @@ export async function routeChat(
     return new Response("WebSocket only", { status: 426 });
   const headers = new Headers(req.headers);
   for (const h of Object.values(IDENTITY_HEADERS)) headers.delete(h);
+  headers.delete(IP_HEADER);
   const hub = ns.get(ns.idFromName(opts.name ?? "chat"));
   // The DO tells the two apart by the path's ending.
   const inner = new URL(url);
   if (url.pathname === controlPath) {
     if (req.headers.get("origin")) return new Response("forbidden", { status: 403 });
+    // Cloudflare's own header (a client cannot set it through Cloudflare),
+    // for the per-IP pairing limits.
+    const ip = req.headers.get("cf-connecting-ip");
+    if (ip) headers.set(IP_HEADER, ip.slice(0, 64));
     inner.pathname = "/control";
     return hub.fetch(new Request(inner, { headers }));
   }

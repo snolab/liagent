@@ -7,6 +7,7 @@ import {
   FRIEND_MAX_PAGES,
   FRIEND_RELABEL_MS,
   PAIR_COOLDOWN_MS,
+  PAIR_AUDIENCE_MAX,
   PAIR_MAX,
   PAIR_WINDOW_MS,
   pageOriginAllowed,
@@ -100,7 +101,7 @@ function setup() {
     );
     return ws;
   };
-  const controller = (label = "main lane", scope?: "chat" | "eval") => {
+  const controller = (label = "main lane", scope?: "chat" | "eval", ip?: string) => {
     const ws = new FakeSocket();
     sockets.push(ws);
     void hub.connectController(
@@ -108,6 +109,8 @@ function setup() {
       new URL(
         `https://example.com/api/chat/control?label=${encodeURIComponent(label)}${scope ? `&scope=${scope}` : ""}`,
       ),
+      null,
+      ip,
     );
     return ws;
   };
@@ -1350,5 +1353,68 @@ describe("ChatHub logs", () => {
       );
     });
     expect(verbose).toContain("a private note");
+  });
+});
+
+describe("ChatHub pairing limits per client IP", () => {
+  it("a stranger using up their own quota does not lock out another IP", () => {
+    const s = setup();
+    s.page();
+    for (let i = 0; i < PAIR_MAX; i++) {
+      expect(s.controller("a", undefined, "203.0.113.9").last("pending")).toBeTruthy();
+      s.tick(PENDING_MS);
+    }
+    expect(s.controller("a", undefined, "203.0.113.9").closed).toBe(4429);
+    expect(
+      s.controller("the user's agent", undefined, "198.51.100.7").last("pending"),
+    ).toBeTruthy();
+  });
+
+  it("a deny cools down only the IP that knocked", async () => {
+    const s = setup();
+    const p = s.page();
+    s.controller("a", undefined, "203.0.113.9");
+    await s.msg(p, { type: "deny", pair: s.pairOf(p) });
+    expect(s.controller("a", undefined, "203.0.113.9").closed).toBe(4429);
+    expect(s.controller("b", undefined, "198.51.100.7").last("pending")).toBeTruthy();
+  });
+
+  it("all IPs together raise at most PAIR_AUDIENCE_MAX prompts per window", async () => {
+    const s = setup();
+    const p = s.page();
+    // Many IPs, each request denied at once: only the audience cap stops them.
+    for (let i = 0; i < PAIR_AUDIENCE_MAX; i++) {
+      expect(s.controller("a", undefined, `192.0.2.${i}`).last("pending")).toBeTruthy();
+      await s.msg(p, { type: "deny", pair: s.pairOf(p) });
+    }
+    expect(s.controller("a", undefined, "192.0.2.200").closed).toBe(4429);
+    s.tick(PAIR_WINDOW_MS);
+    expect(s.controller("a", undefined, "192.0.2.201").last("pending")).toBeTruthy();
+  });
+});
+
+describe("routeChat client IP", () => {
+  it("passes cf-connecting-ip to the hub for agents, and drops a client-sent one", async () => {
+    const calls: Request[] = [];
+    const ns = {
+      idFromName: (n: string) => n,
+      get: () => ({
+        fetch: async (r: Request) => {
+          calls.push(r);
+          return new Response("hub");
+        },
+      }),
+    };
+    const ws = (headers: Record<string, string>) =>
+      new Request("https://example.com/api/chat/control", {
+        headers: { upgrade: "websocket", ...headers },
+      });
+    const identify = () => null;
+    await routeChat(ws({ "cf-connecting-ip": "203.0.113.9", "x-liagent-ip": "spoof" }), ns, {
+      identify,
+    });
+    await routeChat(ws({ "x-liagent-ip": "spoof" }), ns, { identify });
+    expect(calls[0]!.headers.get("x-liagent-ip")).toBe("203.0.113.9");
+    expect(calls[1]!.headers.get("x-liagent-ip")).toBeNull();
   });
 });
