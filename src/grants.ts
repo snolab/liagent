@@ -3,7 +3,7 @@
 // text, so the directory is created 0700 and every file is written 0600 from
 // the start — never readable by others, not even briefly.
 
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export type Scope = "chat" | "eval";
@@ -32,6 +32,20 @@ export function privateWrite(path: string, text: string) {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
   }
   writeFileSync(path, text, { mode: 0o600 });
+}
+
+/**
+ * Append `text` to `path` (the `listen --out` log, which holds what the user
+ * and friends wrote) as a 0600 file: created that way, or tightened first if
+ * it already exists.
+ */
+export function privateAppend(path: string, text: string) {
+  try {
+    chmodSync(path, 0o600);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
+  appendFileSync(path, text, { mode: 0o600 });
 }
 
 /** One grant per hub and scope: chat keys are the hub URL alone (as before), eval ones "<hub> eval". */

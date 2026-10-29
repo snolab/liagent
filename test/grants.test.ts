@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { grantStore, spillTo } from "../src/grants.ts";
+import { grantStore, privateAppend, spillTo } from "../src/grants.ts";
 
 const root = mkdtempSync(join(tmpdir(), "liagent-grants-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -59,4 +59,17 @@ test("inbox files are 0600 in a 0700 directory", () => {
   expect(p.endsWith("ab_c.txt")).toBe(true);
   expect(mode(p)).toBe(0o600);
   expect(mode(join(root, "inbox"))).toBe(0o700);
+});
+
+test("the listen --out log is 0600: created that way, or tightened if it existed", () => {
+  const fresh = join(root, "chat.jsonl");
+  privateAppend(fresh, "a\n");
+  privateAppend(fresh, "b\n");
+  expect(mode(fresh)).toBe(0o600);
+  expect(require("node:fs").readFileSync(fresh, "utf8")).toBe("a\nb\n");
+  const old = join(root, "old.jsonl");
+  writeFileSync(old, "x\n", { mode: 0o644 });
+  chmodSync(old, 0o644);
+  privateAppend(old, "y\n");
+  expect(mode(old)).toBe(0o600);
 });

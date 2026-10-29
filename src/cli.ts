@@ -49,11 +49,10 @@ Pairing prompts the user, so it is rationed:
 (its agent socket is <hub>/control). Default: $LIAGENT_HUB. Grants are kept
 in ~/.config/liagent/grants.json (mode 600; $LIAGENT_GRANTS overrides), one
 per hub and scope. "End" in the box revokes a grant; the CLI then forgets it.`;
-import { appendFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { deliveryText } from "./deliver.ts";
-import { type Scope, grantStore, spillTo } from "./grants.ts";
+import { type Scope, grantStore, privateAppend, spillTo } from "./grants.ts";
 import { PENDING_MS, type ChatMessage } from "./protocol.ts";
 
 type Msg = Record<string, unknown> & { type?: string };
@@ -371,7 +370,7 @@ async function cmdListen(hub: string) {
           if (c.from === "agent") return;
           const line = JSON.stringify({ type: "chat", ...c });
           console.log(line);
-          if (out) appendFileSync(out, `${line}\n`);
+          if (out) privateAppend(out, `${line}\n`);
           if (to) {
             undelivered.push(deliveryText(hub, c, spillToInbox));
             flush();
@@ -384,7 +383,7 @@ async function cmdListen(hub: string) {
         } else if (m.type === "friend-new" || m.type === "page-changed") {
           const line = JSON.stringify(m);
           console.log(line);
-          if (out) appendFileSync(out, `${line}\n`);
+          if (out) privateAppend(out, `${line}\n`);
         } else if (m.type === "error") console.error(`liagent: ${m.error}`);
         else if (m.type === "revoked") {
           console.error("liagent: the user ended this session.");
