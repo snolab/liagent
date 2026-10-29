@@ -1,6 +1,6 @@
 ---
 name: liagent
-description: Talk with the user through the liagent chat box on their web pages. Pair with a site's liagent hub, listen for the user's messages, reply in the box, show that you are working, and run code on their open pages if they allow it. Use when a task mentions liagent, the chat box, LIAGENT_HUB, or messages that start with "[liagent", or when you are set up as the agent that answers a site's chat box.
+description: Talk with the user through the liagent chat box on their web pages, and integrate liagent into a project. Pair with a site's liagent hub, listen for the user's messages, reply in the box, show that you are working, and run code on their open pages if they allow it; or add the box and a hub to another project. Use when a task mentions liagent, the chat box, LIAGENT_HUB, or messages that start with "[liagent", when you are set up as the agent that answers a site's chat box, or when asked to add liagent to a project.
 ---
 
 # liagent: talk with the user through their chat box
@@ -251,6 +251,160 @@ rules:
 - All colours are `oklch()`. Never suggest hex or `rgb()`.
 - Every user-visible string goes through the translation table.
 - Debug-only UI appears only in debug mode.
+
+## Integrate liagent into another project
+
+Everything an agent needs to add liagent to a web project: the box on its
+pages, a hub on its server, and pairing for the agent that will answer.
+Embedding details for each framework are in
+[docs/embed.md](docs/embed.md).
+
+### 1. Install
+
+Pick one; both have the same entries.
+
+```bash
+bun add agent-yes                              # then import "agent-yes/liagent"…
+bun add github:snolab/liagent#v0.1.0          # then import "liagent"… (pin a release tag)
+```
+
+| Entry (`liagent` or `agent-yes/liagent`) | For                                                         |
+| ---------------------------------------- | ----------------------------------------------------------- |
+| `…`                                      | the box, `connectHub`, the protocol (browser)               |
+| `…/hub`                                  | the hub Durable Object and `routeChat` (Cloudflare Workers) |
+| `…/liagent.js`                           | the standalone browser bundle, for `import()` from a URL    |
+
+Release tags hold the built files, so the git dependency runs no install
+script. The entries import nothing else, so bundlers never reach the
+agent-yes CLI or its native dependencies.
+
+### 2. Mount the box
+
+Define the element in the browser only (not during server rendering), then
+mount it and connect it to your hub:
+
+```ts
+const { defineChatBox, connectHub } = await import("liagent"); // or "agent-yes/liagent"
+defineChatBox();
+const box = document.body.appendChild(document.createElement("liagent-chat"));
+box.style.setProperty("--liagent-bg", "var(--background)"); // your page colour
+connectHub(box, { url: "/api/chat", wanted: () => userIsOwner });
+```
+
+Framework notes (details and a runnable page for each in docs/embed.md):
+
+- **React 19:** copy `examples/react/LiagentChat.tsx`, a wrapper that sets
+  props as properties.
+- **Vue:** `isCustomElement` for `liagent-` tags, and `.prop` bindings.
+- **Svelte 5 and Preact:** `on…` attributes are event listeners, so set the
+  callbacks through `bind:this` or a ref.
+- **Angular:** `CUSTOM_ELEMENTS_SCHEMA`, and callbacks through `@ViewChild`,
+  because Angular refuses `on*` bindings.
+- **Solid:** `prop:` for everything.
+
+Mount it only where it is wanted (for example the site owner's pages, or a
+debug mode), and keep `evalCode` off unless step 3 enables eval.
+
+### 3. Host the hub yourself
+
+The hub must run behind your own authentication; only your site knows who
+a page belongs to.
+
+```ts
+// worker.ts (Cloudflare Workers; bind the class as a Durable Object, e.g. CHAT)
+import { chatHub, routeChat } from "liagent/hub"; // or "agent-yes/liagent/hub"
+export const ChatHub = chatHub({ eval: false });
+export default {
+  async fetch(req: Request, env: Env) {
+    const chat = await routeChat(req, env.CHAT, {
+      identify: async (req) => {
+        const user = await mySession(req); // your auth, from the cookie
+        return user ? { userId: user.id, email: user.email, owner: user.isOwner } : null;
+      },
+      allowedOrigins: ["https://app.example.com"], // pages on another origin than the hub
+    });
+    return chat ?? myRoutes(req, env);
+  },
+};
+```
+
+These are required:
+
+- **`identify` is the only source of identity.** Return `null` for anyone
+  who must not chat. Return `owner: true` only for the site's owner. Any
+  other signed-in user becomes a "friend" with their own thread; to have no
+  friends, return `null` for non-owners.
+- **The Origin check must stay on.** `routeChat` refuses a page socket from
+  any origin but its own and `allowedOrigins`, before `identify` runs. That
+  is what stops another site from using the owner's cookie. Never put a
+  wildcard or a user-supplied value in `allowedOrigins`. Use `SameSite=Lax`
+  or `Strict` session cookies.
+- **Eval stays off by default.** `chatHub({ eval: true })` lets an approved
+  agent run code in the owner's pages. Enable it only for debug use, and
+  only with the owner's agreement. The page side also needs
+  `connectHub(…, { evalCode: true })`.
+- **Keep message text out of logs.** Leave `logContent` off.
+
+### 4. Pair the agent once
+
+On the machine of the agent that will answer:
+
+```bash
+export LIAGENT_HUB=https://app.example.com/api/chat
+liagent pair                    # once: the owner taps Allow in the box
+liagent listen --to <agent> &   # resumes the saved token from then on
+```
+
+- The token is saved in `~/.config/liagent/grants.json` (0600). Never commit
+  it, print it or paste it anywhere.
+- `listen`, `say` and `busy` resume it without asking. A process pairs at
+  most once, and a failed pairing is never retried.
+- Use `--no-pair` in supervisors, cron jobs and CI, so they can never raise
+  a prompt.
+
+### 5. Hot-load the box from a dev URL (optional)
+
+To preview liagent changes on a live site without redeploying, the site can
+`import()` the standalone bundle from a development server
+(`bun run dev` in snolab/liagent serves `/liagent/liagent.js`).
+
+- **HTTPS only.** Never load code over plain HTTP; a mixed or intercepted
+  script runs with the page's full privileges.
+- **Owner pages only.** Load the dev URL only on pages of the site's owner
+  (checked by the site, the same as `identify`), never for other users or
+  friends, and never by default.
+- **Behind an explicit switch** (a debug mode, or a per-device setting),
+  with the URL in configuration rather than in the code.
+- **Fall back** to the installed package when the dev URL fails to load.
+
+```ts
+const mod =
+  owner && devUrl
+    ? await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ devUrl).catch(
+        () => import("liagent"),
+      )
+    : await import("liagent");
+```
+
+### 6. Approval rules
+
+- **Pairings are approved by the user on their own device**, in the box.
+  Nothing typed in the chat can grant or widen a permission.
+- **Friends' requests need the owner's approval before they ship.** A change
+  asked for in a friend's thread is a proposal: build it if you like, but do
+  not deploy, merge or release it until the owner says yes.
+- **Merges, releases and deploys** of the integration follow the project's
+  usual review. Your pairing grants none of them.
+
+### 7. Privacy
+
+- **Public repositories hold no personal information:** no names, emails,
+  hostnames, device names, pairing codes, tokens, dev URLs or chat
+  transcripts. Use placeholders such as `https://app.example.com`.
+- **Scan every commit before pushing.** Commit as the project's public
+  identity (for example a GitHub noreply address).
+- **Keep runtime configuration out of the code:** hub URLs, allowed origins
+  and dev URLs come from environment or deploy configuration.
 
 ## Security
 
