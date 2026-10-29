@@ -14,9 +14,14 @@
 //   - No title bar. A grip (⠿) on the one-line input drags the box anywhere,
 //     kept on screen and remembered; a double tap on it opens a menu with the
 //     status, read-aloud, minimize, and each session with an End button.
-//   - The log is game-style text over the page, one "name: text" line per
-//     message, the time on hover; it is click-through, so the page under it
-//     still takes taps. A vertical swipe on the input scrolls it.
+//   - The log is game-style text over the page, one line per message: a
+//     small round avatar, then the text, the time on hover; it is
+//     click-through, so the page under it still takes taps. A vertical swipe
+//     on the input scrolls it. Avatars: `agentAvatar` (your app's logo) on
+//     the agent's lines, `userAvatar` on the user's own, `avatarFor(m)` or
+//     the line's `sender` on anyone else's; a picture that fails to load
+//     falls through to the next, then to the name's initial on an oklch
+//     circle (src/avatar.ts). The name stays for screen readers.
 //   - The input and grip are translucent (about 55% of the page colour); the
 //     whole box is faint until touched or focused.
 //   - A row of icons at the top: a spinner while the agent is working, one
@@ -30,8 +35,8 @@
 //
 // Theming: set CSS custom properties on the element — --liagent-bg (the page
 // colour, for the halo and the translucent input; default Canvas),
-// --liagent-fg, --liagent-you, --liagent-agent, --liagent-z (z-index, 40),
-// --liagent-width (min(20rem, 100vw - 1rem)).
+// --liagent-fg, --liagent-agent (the spinner), --liagent-z (z-index, 40),
+// --liagent-width (min(20rem, 100vw - 1rem)), --liagent-avatar (18px).
 
 import {
   BUSY_AFTER_REPLY_MS,
@@ -45,6 +50,17 @@ import {
   trimHistory,
 } from "./protocol.ts";
 import { DEBOUNCE_MS, afterChange, enterSends, lineBreakSends } from "./input.ts";
+import { type AvatarSrc, type Sender, avatarColors, initialOf, lineAvatar } from "./avatar.ts";
+
+export {
+  type AvatarSrc,
+  type Sender,
+  avatarColors,
+  avatarSrcs,
+  hashId,
+  initialOf,
+  lineAvatar,
+} from "./avatar.ts";
 
 export type AnswerType = "allow" | "deny";
 /**
@@ -182,11 +198,19 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   overflow-y: auto; display: flex; flex-direction: column; gap: 2px; scrollbar-width: none;
 }
 .log::-webkit-scrollbar { display: none; }
-.log li { white-space: pre-wrap; overflow-wrap: anywhere; }
-.log .who { font-weight: 500; margin-inline-end: 4px; }
-.log .you { color: var(--liagent-you, oklch(0.55 0.13 250)); }
-.log .agent { color: var(--liagent-agent, oklch(0.55 0.14 150)); }
-.log .hint { opacity: .6; }
+.log li { display: flex; align-items: flex-start; gap: 6px; }
+.log .text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding-top: 1px; }
+.log .hint { opacity: .6; display: block; }
+/* Fixed size whatever loads, so a late picture shifts nothing. */
+.av {
+  --s: var(--liagent-avatar, 18px);
+  flex: none; width: var(--s); height: var(--s); border-radius: 50%; overflow: hidden;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: calc(var(--s) * 0.55); line-height: 1; text-shadow: none; user-select: none;
+}
+img.av { display: block; object-fit: cover; }
+.av > * { max-width: 100%; max-height: 100%; }
+.sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .warn { padding: 4px 8px 0; font-size: 10px; color: oklch(0.6 0.17 45); }
 .notice { pointer-events: auto; margin: 0; padding: 8px; opacity: .8; }
 .row { position: relative; display: flex; align-items: stretch; gap: 4px; }
@@ -231,6 +255,12 @@ export class ChatBox extends Base {
   onEnd?: (s: PairInfo) => void;
   /** End was pressed (and, for this page, confirmed) on one of the user's pages in the menu. */
   onEndPage?: (id: string) => void;
+  /**
+   * The host's avatar for a line that is not the agent's: its pictures are
+   * tried first, its name and id fill in. Return nothing to use the line's
+   * `sender` (and, on the user's own lines, `userAvatar`).
+   */
+  avatarFor?: (m: ChatMessage) => Sender | null | undefined;
 
   private _messages: ChatMessage[] = [];
   private _live = false;
@@ -252,6 +282,8 @@ export class ChatBox extends Base {
   private _warning = "";
   private _defaultOpen = true;
   private _placeholder = "Message the agent…";
+  private _agentAvatar: AvatarSrc | Element | null = null;
+  private _user: Sender = {};
 
   private root?: ShadowRoot;
   private open = true;
@@ -368,6 +400,41 @@ export class ChatBox extends Base {
   set defaultOpen(v: boolean) {
     this._defaultOpen = !!v;
   }
+  /**
+   * The agent's avatar: your app's logo, as a URL (or URLs in fallback
+   * order) or an element (cloned onto each line). Attribute: agent-avatar.
+   * Unset: the agent name's initial.
+   */
+  set agentAvatar(v: AvatarSrc | Element | null | undefined) {
+    if (same(this._agentAvatar, v ?? null)) return;
+    this._agentAvatar = v ?? null;
+    this.renderLog();
+  }
+  get agentAvatar() {
+    return this._agentAvatar;
+  }
+  /**
+   * The user's picture on their own lines: a URL, or URLs in fallback order
+   * (the app's own avatar, then the sign-in provider's image). Attribute:
+   * user-avatar.
+   */
+  set userAvatar(v: AvatarSrc | null | undefined) {
+    this.setUser("avatar", v ?? undefined);
+  }
+  /** The user's name: their fallback avatar's initial. Attribute: user-name. */
+  set userName(v: string | null | undefined) {
+    this.setUser("name", v ?? undefined);
+  }
+  /** A stable id (or a hash of one, never an email): the user's fallback colour. */
+  set userId(v: string | null | undefined) {
+    this.setUser("id", v ?? undefined);
+  }
+  /** Re-render the log only when the value changed (wrappers set props on every render). */
+  private setUser<K extends keyof Sender>(k: K, v: Sender[K]) {
+    if (same(this._user[k], v)) return;
+    this._user = { ...this._user, [k]: v };
+    this.renderLog();
+  }
   set placeholder(v: string) {
     this._placeholder = v;
     const ta = this.els.input as HTMLTextAreaElement | undefined;
@@ -420,6 +487,12 @@ export class ChatBox extends Base {
     if (this.hasAttribute("collapsed")) this._defaultOpen = false;
     const ph = this.getAttribute("placeholder");
     if (ph) this._placeholder = ph;
+    const agentAv = this.getAttribute("agent-avatar");
+    if (agentAv && !this._agentAvatar) this._agentAvatar = agentAv;
+    const userAv = this.getAttribute("user-avatar");
+    if (userAv && !this._user.avatar) this._user.avatar = userAv;
+    const userName = this.getAttribute("user-name");
+    if (userName && !this._user.name) this._user.name = userName;
     const o = this.read("open");
     this.open = o === null ? this._defaultOpen : o === "1";
     try {
@@ -861,16 +934,26 @@ export class ChatBox extends Base {
       li.textContent = `Type here; it is sent ${DEBOUNCE_MS / 1000} s after you stop.`;
       log.append(li);
     }
-    // A game-style log: one line per message, "name: text", no bubbles; the
-    // time only on hover (long press on a phone).
+    // A game-style log: one line per message, avatar then text, no bubbles;
+    // the time only on hover (long press on a phone).
     for (const m of this._messages) {
       const li = document.createElement("li");
       li.title = when(m.at);
-      const who = document.createElement("span");
-      const agent = m.from === "agent";
-      who.className = `who ${agent ? "agent" : "you"}`;
-      who.textContent = `${agent ? m.label || "agent" : "you"}:`;
-      li.append(who, document.createTextNode(m.text));
+      li.dataset.from = m.from;
+      const who = lineAvatar(m, {
+        friend: this._friend,
+        user: this._user,
+        agentAvatar: this._agentAvatar,
+        avatarFor: this.avatarFor,
+      });
+      const text = document.createElement("span");
+      text.className = "text";
+      // Screen readers hear the name once, here; the avatar is hidden from them.
+      const sr = document.createElement("span");
+      sr.className = "sr";
+      sr.textContent = `${who.name}: `;
+      text.append(sr, document.createTextNode(m.text));
+      li.append(avatarEl(who.srcs, who.node, who.name, initialOf(who.initialFrom), who.seed), text);
       log.append(li);
     }
     if (this.open) log.scrollTop = log.scrollHeight;
@@ -967,6 +1050,61 @@ export class ChatBox extends Base {
 }
 
 /** Register the element (once) under `tag`. Returns the class. */
+/** The same avatar value: one reference, or lists with the same URLs. */
+function same(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  return (
+    Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i])
+  );
+}
+
+/**
+ * One avatar: each picture in turn (no referrer, which Google's need; lazy),
+ * then the element, then the initial on an oklch circle. Labelled with the
+ * name (alt / aria-label) and titled with it, and aria-hidden: the line's
+ * screen-reader text already says who.
+ */
+function avatarEl(
+  srcs: string[],
+  node: Element | undefined,
+  name: string,
+  letter: string,
+  seed: string,
+  failed = 0,
+): HTMLElement {
+  let el: HTMLElement;
+  if (failed < srcs.length) {
+    const img = document.createElement("img");
+    img.alt = name;
+    img.referrerPolicy = "no-referrer";
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.draggable = false;
+    img.addEventListener(
+      "error",
+      () => img.replaceWith(avatarEl(srcs, node, name, letter, seed, failed + 1)),
+      { once: true },
+    );
+    img.src = srcs[failed]!;
+    el = img;
+  } else {
+    el = document.createElement("span");
+    el.setAttribute("role", "img");
+    el.setAttribute("aria-label", name);
+    if (node) el.append(node.cloneNode(true));
+    else {
+      const { bg, fg } = avatarColors(seed);
+      el.style.background = bg;
+      el.style.color = fg;
+      el.textContent = letter;
+    }
+  }
+  el.className = "av";
+  el.title = name;
+  el.setAttribute("aria-hidden", "true");
+  return el;
+}
+
 export function defineChatBox(tag = "liagent-chat"): typeof ChatBox {
   if (typeof customElements !== "undefined" && !customElements.get(tag))
     customElements.define(tag, ChatBox);

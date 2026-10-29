@@ -61,6 +61,15 @@ export type LiagentChatProps = {
   /** localStorage prefix for the box's per-device settings. Default "liagent". */
   storageKey?: string;
   placeholder?: string;
+  /** The agent's avatar: your app's logo, a URL (or URLs in fallback order) or an element. */
+  agentAvatar?: string | string[] | Element;
+  /** The user's picture on their own lines, URLs in fallback order (app avatar, then provider image). */
+  userAvatar?: string | string[];
+  /** The user's name (their fallback initial) and a stable id (its colour; never an email). */
+  userName?: string;
+  userId?: string;
+  /** The host's avatar for anyone else's line (tried before the line's own sender). */
+  avatarFor?: (m: ChatMessage) => { id?: string; name?: string; avatar?: string | string[] } | null;
   /** Element styles: theme it with --liagent-bg and friends. */
   style?: React.CSSProperties & Record<`--${string}`, string>;
   ref?: Ref<LiagentChatHandle>;
@@ -110,6 +119,7 @@ export function LiagentChat({
     el.onEnd = (s) => cb.current.onEnd?.(s);
     el.onAnswer = (type, p, answer) => cb.current.onAnswer?.(type, p, answer);
     el.onEndPage = (id) => cb.current.onEndPage?.(id);
+    el.avatarFor = (m) => cb.current.avatarFor?.(m);
     host.current.append(el);
     box.current = el;
     return () => {
@@ -137,6 +147,11 @@ export function LiagentChat({
     el.notice = props.notice;
     el.warning = props.warning;
     if (props.placeholder) el.placeholder = props.placeholder;
+    // Each setter re-renders the log only when its value changed.
+    el.agentAvatar = props.agentAvatar;
+    el.userAvatar = props.userAvatar;
+    el.userName = props.userName;
+    el.userId = props.userId;
     for (const [k, v] of Object.entries(style ?? {})) el.style.setProperty(k, String(v));
   });
 

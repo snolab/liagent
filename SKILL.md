@@ -290,8 +290,24 @@ const { defineChatBox, connectHub } = await import("liagent"); // or "agent-yes/
 defineChatBox();
 const box = document.body.appendChild(document.createElement("liagent-chat"));
 box.style.setProperty("--liagent-bg", "var(--background)"); // your page colour
+box.agentAvatar = "/logo.svg"; // your app's logo, on the agent's lines
+box.userAvatar = [user.avatarUrl, user.image]; // the signed-in user's picture(s)
+box.userName = user.name; // their fallback initial
+box.userId = user.id; // their fallback colour (an id or its hash, never an email)
 connectHub(box, { url: "/api/chat", wanted: () => userIsOwner });
 ```
+
+**Avatars.** Each log line starts with a small round avatar instead of a
+name. Set `agentAvatar` to your app's logo: a URL, or an element (cloned
+onto each line); the `agent-avatar` attribute works too. Set `userAvatar`
+to the signed-in user's picture: a URL, or URLs in fallback order (your
+app's own avatar, then the sign-in provider's image, such as better-auth or
+next-auth `user.image`). For other people's lines (friends, in the owner's
+view), set `avatarFor = (m) => ({ name, avatar, id })`, or have your hub put
+a `sender` on each message. A picture that fails to load falls through to
+the next. After the last one, the box shows the name's initial on
+`oklch(0.7 0.12 <hue>)`, with the hue taken from the id and the letter at
+4.5:1 contrast or better. The name stays readable to screen readers.
 
 Framework notes (details and a runnable page for each in docs/embed.md):
 
