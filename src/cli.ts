@@ -41,6 +41,8 @@ Pairing prompts the user, so it is rationed:
     pairs once; if that fails too, it stops (listen stays idle).
   - A pairing that fails is never retried: denied, expired (4408),
     another request waiting (4429), no page open (4404), or no answer.
+    Only a network failure before the user was shown anything is retried
+    (listen backs off and tries again): no prompt was spent.
   - --no-pair (any command): only ever resume; never ask.
 
 [hub] is the hub's page-socket URL, e.g. https://dev.example.com/api/chat
@@ -131,6 +133,8 @@ class ConnectError extends Error {
     message: string,
     readonly code: number,
     readonly fatal: boolean,
+    /** Whether the user was shown a prompt (the hub said "pending") before it failed. */
+    readonly prompted = false,
   ) {
     super(message);
   }
@@ -148,6 +152,7 @@ function attempt(hub: string, scope: Scope, token?: string): Promise<WebSocket> 
     const ws = open(hub, scope, token);
     let settled = false;
     let reason = "";
+    let prompted = false;
     const done = (err?: ConnectError) => {
       if (settled) return;
       settled = true;
@@ -158,16 +163,17 @@ function attempt(hub: string, scope: Scope, token?: string): Promise<WebSocket> 
       } else resolve(ws);
     };
     const give = setTimeout(
-      () => done(new ConnectError("no answer in the box within 2 minutes", 0, true)),
+      () => done(new ConnectError("no answer in the box within 2 minutes", 0, true, prompted)),
       PENDING_MS + 5_000,
     );
     ws.onmessage = (e) => {
       const m = JSON.parse(String(e.data)) as Msg;
-      if (m.type === "pending")
+      if (m.type === "pending") {
+        prompted = true;
         console.error(
           `Pairing as "${label}" (${scope === "eval" ? "run code and chat, 8 hours" : "chat, 30 days"}). In the box, allow code  ${m.code}`,
         );
-      else if (m.type === "approved") {
+      } else if (m.type === "approved") {
         // Every approval of the user's own carries a token (chat 30 days, eval 8 hours).
         if (typeof m.token === "string") saveToken(hub, scope, m.token, Number(m.until));
         if (!m.resumed)
@@ -186,6 +192,7 @@ function attempt(hub: string, scope: Scope, token?: string): Promise<WebSocket> 
           reason || `socket closed (${e.code}${e.reason ? ` ${e.reason}` : ""})`,
           e.code,
           false,
+          prompted,
         ),
       );
   });
@@ -223,7 +230,15 @@ async function connect(hub: string, scope: Scope = "chat"): Promise<WebSocket> {
     return await attempt(hub, scope);
   } catch (e) {
     const err = e as ConnectError;
-    throw new ConnectError(`pairing failed: ${err.message}`, err.code, true);
+    // The network failed before the hub showed the user anything (no
+    // "pending", and not a refusal from the hub, which closes with 4xxx): no
+    // prompt was spent, so this does not count as the one pairing, and the
+    // caller may try again later.
+    if (!err.prompted && err.code < 4000) {
+      pairedOnce = false;
+      throw new ConnectError(`could not reach the hub to pair: ${err.message}`, err.code, false);
+    }
+    throw new ConnectError(`pairing failed: ${err.message}`, err.code, true, err.prompted);
   }
 }
 
