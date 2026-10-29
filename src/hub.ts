@@ -145,6 +145,8 @@ export type DOState = {
   acceptWebSocket(ws: Socket): void;
   getWebSockets(): Socket[];
   storage: Storage;
+  /** Cloudflare's: holds every event until `fn` is done (used to load state on wake). */
+  blockConcurrencyWhile?<T>(fn: () => Promise<T>): Promise<T>;
 };
 
 /** Who a page is: set by routeChat() from the site's answer, never by the page. */
@@ -193,6 +195,8 @@ type Grant = { label: string; until: number; pages?: string[] | "all"; scope?: S
 const DORMANT = "g:";
 const dormantPair = (hash: string) => `${DORMANT}${hash.slice(0, 40)}`;
 type Rate = { start: number; count: number };
+/** A pairing-limit counter: its window's start and count, and the last deny. */
+type Knock = { start: number; count: number; deniedAt?: number };
 type Att = PageAtt | ControllerAtt;
 declare const WebSocketPair: { new (): { 0: Socket; 1: Socket } };
 
@@ -277,6 +281,8 @@ export class ChatHub {
     opts: HubOptions = {},
   ) {
     this.opts = { ...this.opts, ...stripUndefined(opts) };
+    // The pairing limits survive hibernation: load them before any event.
+    if (ctx.blockConcurrencyWhile) void ctx.blockConcurrencyWhile(() => this.loadKnocks());
   }
 
   /**
@@ -286,12 +292,35 @@ export class ChatHub {
    */
   private grants?: Map<string, Grant>;
   /**
-   * Pairing requests per audience, to bound the prompts anyone can raise:
-   * the window's start and count, and when the user last denied one. Kept in
-   * memory (a hub woken from hibernation starts afresh): it only has to stop
-   * a stream of prompts, and the knock stays synchronous.
+   * Pairing requests per (audience, IP) and per audience, to bound the
+   * prompts anyone can raise: the window's start and count, and when the
+   * user last denied one. Read synchronously from this map, written through
+   * to storage (`knock:<key>`), and loaded back when a hub wakes from
+   * hibernation (under blockConcurrencyWhile, before any event), so an
+   * evicted hub does not forget them. Where the host has no
+   * blockConcurrencyWhile they are kept in memory only.
    */
-  private knocks = new Map<string, { start: number; count: number; deniedAt?: number }>();
+  private knocks = new Map<string, Knock>();
+
+  private setKnock(key: string, k: Knock) {
+    this.knocks.set(key, k);
+    // Durable Objects hold outgoing messages until this write commits.
+    void this.ctx.storage.put(`knock:${key}`, k);
+  }
+
+  /** Load the stored counters; drop those whose window and cooldown have both passed. */
+  private async loadKnocks() {
+    const t = this.now();
+    const m = await this.ctx.storage.list<Knock>({ prefix: "knock:" });
+    for (const [k, v] of m) {
+      const key = k.slice("knock:".length);
+      const live =
+        t - v.start < PAIR_WINDOW_MS ||
+        (v.deniedAt !== undefined && t - v.deniedAt < PAIR_COOLDOWN_MS);
+      if (live) this.knocks.set(key, v);
+      else await this.ctx.storage.delete(k);
+    }
+  }
 
   /**
    * Room for one more pairing request for audience `who` from client `ip`:
@@ -303,7 +332,7 @@ export class ChatHub {
    */
   private knockAllowed(ws: Socket, who: string, ip = "?") {
     const t = this.now();
-    const fresh = (k?: { start: number; count: number; deniedAt?: number }) =>
+    const fresh = (k?: Knock) =>
       !k || t - k.start >= PAIR_WINDOW_MS ? { start: t, count: 0, deniedAt: k?.deniedAt } : k;
     const mine = fresh(this.knocks.get(knockKey(who, ip)));
     const all = fresh(this.knocks.get(knockKey(who)));
@@ -317,8 +346,8 @@ export class ChatHub {
       close(ws, 4429, "pairing rate limit");
       return false;
     }
-    this.knocks.set(knockKey(who, ip), { ...mine, count: mine.count + 1 });
-    this.knocks.set(knockKey(who), { ...all, count: all.count + 1 });
+    this.setKnock(knockKey(who, ip), { ...mine, count: mine.count + 1 });
+    this.setKnock(knockKey(who), { ...all, count: all.count + 1 });
     return true;
   }
   private loadingGrants?: Promise<void>;
@@ -1023,7 +1052,7 @@ export class ChatHub {
       // The cooldown is for the IP that knocked, not for everyone.
       const key = knockKey(audience(a), a.ip ?? "?");
       const t = this.now();
-      this.knocks.set(key, { ...(this.knocks.get(key) ?? { start: t, count: 0 }), deniedAt: t });
+      this.setKnock(key, { ...(this.knocks.get(key) ?? { start: t, count: 0 }), deniedAt: t });
     }
     const targets = a.grant
       ? this.sockets("controller").filter((c) => c.a.grant === a.grant)

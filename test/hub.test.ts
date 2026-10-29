@@ -1418,3 +1418,56 @@ describe("routeChat client IP", () => {
     expect(calls[1]!.headers.get("x-liagent-ip")).toBeNull();
   });
 });
+
+describe("ChatHub pairing limits survive hibernation", () => {
+  it("a hub woken with the same storage remembers the counts and the cooldown", async () => {
+    const storage = fakeStorage();
+    let t = 1_000_000;
+    let loading: Promise<unknown> = Promise.resolve();
+    const wake = () => {
+      const sockets: FakeSocket[] = [];
+      const hub = new ChatHub(
+        {
+          acceptWebSocket: () => {},
+          getWebSockets: () => sockets,
+          storage,
+          blockConcurrencyWhile: <T>(fn: () => Promise<T>) => (loading = fn()) as Promise<T>,
+        },
+        undefined,
+        () => t,
+      );
+      const page = new FakeSocket();
+      sockets.push(page);
+      void hub.connectPage(page, new URL("https://example.com/api/chat"));
+      const knock = (ip: string) => {
+        const ws = new FakeSocket();
+        sockets.push(ws);
+        void hub.connectController(
+          ws,
+          new URL("https://example.com/api/chat/control?label=a"),
+          null,
+          ip,
+        );
+        return ws;
+      };
+      return { hub, page, knock };
+    };
+    const first = wake();
+    await loading;
+    for (let i = 0; i < PAIR_MAX; i++) {
+      expect(first.knock("203.0.113.9").last("pending")).toBeTruthy();
+      t += PENDING_MS;
+    }
+    await new Promise((r) => setTimeout(r, 0)); // the write-through puts
+    // Evicted: a new instance on the same storage.
+    const second = wake();
+    await loading;
+    expect(second.knock("203.0.113.9").closed).toBe(4429);
+    expect(second.knock("198.51.100.7").last("pending")).toBeTruthy();
+    // Once the window has passed, the stored counter is dropped on wake.
+    t += PAIR_WINDOW_MS;
+    const third = wake();
+    await loading;
+    expect(third.knock("203.0.113.9").last("pending")).toBeTruthy();
+  });
+});
