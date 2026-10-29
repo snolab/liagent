@@ -1,0 +1,69 @@
+name: Release
+
+# Cut a liagent release: tag v<package.json version> on a release commit that
+# includes the built dist/ (dist/ is gitignored on main). agent-yes depends on
+# "github:snolab/liagent#v<version>" and ships that dist as agent-yes/liagent;
+# moving it to a new release is a one-line pin bump in agent-yes, by hand.
+# Manual only: bump "version" in package.json in a PR, merge it, then run
+# this workflow from the Actions tab.
+#
+# Publishing liagent on npm by itself is optional (input "npm", off by
+# default). It uses npm trusted publishing (OIDC, no token): set it up once on
+# npmjs.com → the liagent package → Settings → Trusted publishing (GitHub
+# Actions, snolab/liagent, release.yml). A package name's very first publish
+# has to be done once by hand before that can be configured.
+
+on:
+  workflow_dispatch:
+    inputs:
+      npm:
+        description: "Also publish liagent to npm (trusted publishing)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # push the release tag
+  id-token: write # npm trusted publishing and provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run build
+      - name: Version
+        id: v
+        run: |
+          v=$(bun -e 'console.log(require("./package.json").version)')
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null; then
+            echo "v$v is already tagged; bump the version first." >&2
+            exit 1
+          fi
+      # The tag points at a commit off main that also holds dist/, so a git
+      # dependency on the tag gets built files without running any script.
+      - name: Tag a release commit with dist/
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --detach
+          git add -f dist
+          git commit -q -m "release ${{ steps.v.outputs.tag }}: built dist"
+          git tag "${{ steps.v.outputs.tag }}"
+          git push origin "${{ steps.v.outputs.tag }}"
+      - uses: actions/setup-node@v5
+        if: ${{ inputs.npm }}
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Publish to npm
+        if: ${{ inputs.npm }}
+        run: |
+          npm install -g npm@^11.5.1
+          npm publish --ignore-scripts --access public --provenance

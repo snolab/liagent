@@ -1,0 +1,101 @@
+{
+  "name": "liagent",
+  "version": "0.1.0",
+  "description": "User ⇄ agent chat for any web page: a floating chat box (a framework-free custom element), its hub (a Cloudflare Durable Object), and the agent's CLI",
+  "keywords": [
+    "agent",
+    "ai-agent",
+    "chat",
+    "cloudflare",
+    "custom-element",
+    "durable-objects",
+    "web-component",
+    "websocket"
+  ],
+  "homepage": "https://github.com/snolab/liagent#readme",
+  "bugs": {
+    "url": "https://github.com/snolab/liagent/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/snolab/liagent.git"
+  },
+  "bin": {
+    "liagent": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.map",
+    "README.md",
+    "SKILL.md",
+    "docs",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "browser": "./dist/index.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./box": {
+      "types": "./dist/box.d.ts",
+      "browser": "./dist/box.js",
+      "import": "./dist/box.js",
+      "default": "./dist/box.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "browser": "./dist/client.js",
+      "import": "./dist/client.js",
+      "default": "./dist/client.js"
+    },
+    "./protocol": {
+      "types": "./dist/protocol.d.ts",
+      "browser": "./dist/protocol.js",
+      "import": "./dist/protocol.js",
+      "default": "./dist/protocol.js"
+    },
+    "./hub": {
+      "types": "./dist/hub.d.ts",
+      "import": "./dist/hub.js",
+      "default": "./dist/hub.js"
+    },
+    "./liagent.js": "./dist/liagent.js",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build": "tsdown && bun build src/browser.ts --outdir dist --entry-naming liagent.js --format esm --target browser --minify",
+    "dev": "bun run scripts/dev.ts",
+    "test": "bun test",
+    "typecheck": "tsrs --noEmit",
+    "lint": "oxlint",
+    "fmt": "oxlint --fix && oxfmt",
+    "fmt:check": "oxfmt --check",
+    "check": "bun run lint && bun run fmt:check && bun run typecheck && bun run test",
+    "prepublishOnly": "bun run check && bun run build"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "19",
+    "@types/react-dom": "19",
+    "oxfmt": "0.75.0",
+    "oxlint": "1.90.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "tsdown": "^0.20.3",
+    "tsrs": "0.20.1-ts7.1.0-beta",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "bun": ">=1.2"
+  }
+}

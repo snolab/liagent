@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Check (lint, format, typecheck, tests)
+        run: bun run check
+      - name: Build
+        run: bun run build
+      # What npm would publish: the built entries and docs, no sources or maps.
+      - name: Package contents
+        run: |
+          bun pm pack --dry-run --ignore-scripts > /tmp/pack.txt 2>&1
+          cat /tmp/pack.txt
+          for f in index.js index.d.ts box.js client.js protocol.js hub.js hub.d.ts cli.js liagent.js; do
+            grep -q "dist/$f" /tmp/pack.txt || { echo "missing from the package: dist/$f" >&2; exit 1; }
+          done
+          if grep -E " (src|test|examples|demo|scripts)/|\.map$" /tmp/pack.txt; then
+            echo "sources or source maps would be published" >&2; exit 1
+          fi
