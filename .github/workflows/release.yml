@@ -47,7 +47,9 @@ jobs:
             exit 1
           fi
       # The tag points at a commit off main that also holds dist/, so a git
-      # dependency on the tag gets built files without running any script.
+      # dependency on it gets built files without running any script. The
+      # commit also gets its own branch, release/v<version>, so it stays
+      # reachable (and is never garbage-collected) whatever happens to the tag.
       - name: Tag a release commit with dist/
         run: |
           git config user.name "github-actions[bot]"
@@ -56,7 +58,8 @@ jobs:
           git add -f dist
           git commit -q -m "release ${{ steps.v.outputs.tag }}: built dist"
           git tag "${{ steps.v.outputs.tag }}"
-          git push origin "${{ steps.v.outputs.tag }}"
+          git push origin "${{ steps.v.outputs.tag }}" "HEAD:refs/heads/release/${{ steps.v.outputs.tag }}"
+          echo "Release commit (pin this full sha): $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/setup-node@v5
         if: ${{ inputs.npm }}
         with:

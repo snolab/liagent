@@ -96,12 +96,23 @@ listen, reply, and behave in the chat.
 
 ## Releases
 
-`.github/workflows/release.yml`, run by hand, tags `v<version>` on a release
-commit that includes the built `dist/`, so `github:snolab/liagent#v<version>`
-works as a dependency with no build step. agent-yes pins such a tag and ships
-this package as `agent-yes/liagent`; moving it to a new release is a one-line
-bump of that pin in agent-yes. The workflow can also publish to npm (trusted
-publishing), off by default.
+`.github/workflows/release.yml`, run by hand, makes a release commit off
+`main` that includes the built `dist/`, tags it `v<version>`, and keeps it on
+its own branch `release/v<version>` so it stays reachable. Depend on it by
+its full commit sha (the workflow's summary prints it); the tag is a
+readable alias:
+
+```bash
+bun add github:snolab/liagent#261b907f888b9d2c7c95a1fd53f90d874db27226   # v0.1.0
+```
+
+A git dependency on a release commit gets the built files with no build
+step. agent-yes pins one this way and ships this package as
+`agent-yes/liagent`; moving to a new release is a one-line bump of that pin.
+The workflow can also publish to npm (trusted publishing), off by default.
+
+Repository owners: add a tag ruleset for `v*` that blocks updates and
+deletions, so a release tag can never be moved.
 
 ## Develop
 

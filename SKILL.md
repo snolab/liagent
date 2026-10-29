@@ -265,7 +265,7 @@ Pick one; both have the same entries.
 
 ```bash
 bun add agent-yes                              # then import "agent-yes/liagent"…
-bun add github:snolab/liagent#v0.1.0          # then import "liagent"… (pin a release tag)
+bun add github:snolab/liagent#<release commit sha>   # then import "liagent"…
 ```
 
 | Entry (`liagent` or `agent-yes/liagent`) | For                                                         |
@@ -274,8 +274,10 @@ bun add github:snolab/liagent#v0.1.0          # then import "liagent"… (pin a 
 | `…/hub`                                  | the hub Durable Object and `routeChat` (Cloudflare Workers) |
 | `…/liagent.js`                           | the standalone browser bundle, for `import()` from a URL    |
 
-Release tags hold the built files, so the git dependency runs no install
-script. The entries import nothing else, so bundlers never reach the
+Pin a release by its full commit sha (each `v*` tag and `release/v*` branch
+names one; v0.1.0 is `261b907f888b9d2c7c95a1fd53f90d874db27226`), not by a
+tag that could move. Release commits hold the built files, so the git
+dependency runs no install script. The entries import nothing else, so bundlers never reach the
 agent-yes CLI or its native dependencies.
 
 ### 2. Mount the box
