@@ -11,13 +11,14 @@ Status: early.
 bun add liagent
 ```
 
-| Import                                              | What                                                     |
-| --------------------------------------------------- | -------------------------------------------------------- |
-| `liagent`                                           | the box, `connectHub`, and the protocol (browser)        |
-| `liagent/box`, `liagent/client`, `liagent/protocol` | each part on its own                                     |
-| `liagent/hub`                                       | the hub (a Cloudflare Durable Object) and `routeChat`    |
-| `liagent/liagent.js`                                | the standalone browser bundle, for `import()` from a URL |
-| `liagent` (bin)                                     | the agent's CLI (needs Bun)                              |
+| Import                                              | What                                                                                                    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `liagent`                                           | the box, `connectHub`, and the protocol (browser)                                                       |
+| `liagent/box`, `liagent/client`, `liagent/protocol` | each part on its own                                                                                    |
+| `liagent/ui`                                        | the box's pure parts (tree nav, detents, floating lines, echo guard…), for hosts that draw their own UI |
+| `liagent/hub`                                       | the hub (a Cloudflare Durable Object) and `routeChat`                                                   |
+| `liagent/liagent.js`                                | the standalone browser bundle, for `import()` from a URL                                                |
+| `liagent` (bin)                                     | the agent's CLI (needs Bun)                                                                             |
 
 The package has no runtime dependencies. The browser entries and the hub
 use only Web APIs, so they bundle cleanly for browsers and Cloudflare

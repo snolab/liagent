@@ -8,6 +8,7 @@ export default defineConfig({
     index: "./src/browser.ts",
     box: "./src/box.ts",
     tree: "./src/tree.ts",
+    ui: "./src/ui.ts",
     client: "./src/client.ts",
     hub: "./src/hub.ts",
     protocol: "./src/protocol.ts",
