@@ -11,6 +11,7 @@ position, so it fits any page and any framework. This guide covers:
 5. [Vue, Svelte, Angular, Solid and Preact](#5-vue-svelte-angular-solid-and-preact)
 6. [Reference](#6-reference): properties, callbacks, attributes, theming
 7. [Security notes](#7-security-notes)
+8. [Voice input](#8-voice-input): `<liagent-mic>`, your STT endpoint, Silero VAD
 
 ## 1. Loading it
 
@@ -549,3 +550,201 @@ apply.
   the friends feature off by not identifying non-owners in `identify`.
 - **Text only:** the box sets message text with `textContent`, so a message
   can never inject markup.
+
+## 8. Voice input
+
+`<liagent-mic>` (`liagent/mic`, also in `liagent.js`) is a mic button that
+dictates into the box. One tap turns listening on, and another tap or
+Escape turns it off. While it listens, a voice-activity detector (VAD) cuts
+speech into utterances. Each utterance is sent to your STT endpoint as soon
+as it ends, and the requests run in parallel. Transcripts land in the draft
+in the order they were spoken. A long utterance (over 3 s) also sends
+rolling partial chunks every 2.5 s, overlapping by 1.5 s. Their text shows
+dimmed until the final transcript replaces it. A final transcript with
+words in it is punctuated (`。`/`？` for CJK, `.`/`?` otherwise) and sent at
+once, so a short "OK" or "好" goes out too. Partials are never sent. An
+utterance is capped at 30 s; past that it is cut and sent, and listening
+goes on.
+
+```html
+<liagent-chat>
+  <liagent-mic slot="mic" stt-url="/api/stt" lang="en"></liagent-mic>
+</liagent-chat>
+<script type="module">
+  const { defineChatBox, defineMic } = await import("/static/liagent.js");
+  defineChatBox();
+  defineMic();
+</script>
+```
+
+The button hides itself where the browser cannot capture (no
+`getUserMedia` or no Web Audio). It drives the closest `<liagent-chat>`, or
+whatever you assign to `mic.box`.
+
+### The STT endpoint
+
+liagent has no speech-to-text backend. You run one, or point the mic at one
+you already have. The default request is:
+
+```
+POST <stt-url>[?lang=<lang>]
+content-type: audio/wav
+<body: one utterance, RIFF WAV, 16 kHz, mono, 16-bit PCM>
+```
+
+- `lang` is the `lang` attribute, a hint such as `en` or `ja-JP`. With no
+  `lang`, the endpoint should detect the language.
+- Credentials: `same-origin` by default (your session cookie goes along).
+  Set `mic.sttCredentials = "include"` for a cookie on another origin, and
+  `mic.sttHeaders = { authorization: "Bearer …" }` for a token.
+- Partial chunks are separate requests of the same shape, often one every
+  2.5 s while someone talks, so budget your rate limit for them.
+
+It answers JSON:
+
+```json
+{ "text": "Fix the swipe please.", "model": "whisper-large-v3-turbo", "ms": 412, "language": "en" }
+```
+
+Only `text` is read (a missing `text` counts as silence). The other fields
+reach `mic-utterance` listeners only if you use your own `mic.stt`. Errors
+are non-2xx statuses with an optional `{ "error": "message" }`:
+
+| Status | The mic                                                                      |
+| ------ | ---------------------------------------------------------------------------- |
+| 401    | turns listening off; the note says "Sign in to use the mic"                  |
+| 429    | keeps listening; the note says to try again; partials stop until the next on |
+| other  | keeps listening; that utterance is skipped ("Transcription failed (502)")    |
+
+A minimal endpoint on Cloudflare Workers AI:
+
+```ts
+// POST /api/stt: authenticate and rate limit first, as for any paid route.
+const audio = new Uint8Array(await req.arrayBuffer());
+if (!audio.byteLength || audio.byteLength > 5_000_000) return new Response(null, { status: 413 });
+const lang = new URL(req.url).searchParams.get("lang") ?? undefined;
+let bin = "";
+for (const b of audio) bin += String.fromCharCode(b);
+const out = await env.AI.run("@cf/openai/whisper-large-v3-turbo", {
+  audio: btoa(bin),
+  ...(lang ? { language: lang.split("-")[0] } : {}),
+});
+return Response.json({ text: out.text ?? "", language: out.transcription_info?.language });
+```
+
+Speaking another protocol (multipart, an SDK, a socket) is a function
+instead of a URL:
+
+```ts
+import { SttError } from "liagent/mic";
+
+mic.stt = async (wav, { partial, durationMs }) => {
+  const form = new FormData();
+  form.append("file", new Blob([wav], { type: "audio/wav" }), "speech.wav");
+  form.append("model", "whisper-1");
+  const r = await fetch("/api/openai-proxy/audio/transcriptions", { method: "POST", body: form });
+  if (!r.ok) throw new SttError(r.status, await r.text()); // 401 and 429 act as above
+  return (await r.json()).text; // a string, or { text, … }
+};
+```
+
+Keep provider keys on your server: proxy the request, never put a key in
+the page.
+
+### Silero VAD (optional)
+
+Out of the box an energy threshold cuts the utterances. It works anywhere
+and needs nothing, but noise can fool it. For a real VAD, hand over Silero
+([`@ricky0123/vad-web`](https://github.com/ricky0123/vad)). liagent never
+imports it itself, so it stays out of your bundle until the mic is first
+turned on.
+
+```ts
+// From your bundle (bun add @ricky0123/vad-web onnxruntime-web), serving their assets:
+mic.vad = {
+  load: () => import("@ricky0123/vad-web"),
+  baseAssetPath: "/vad/", // silero_vad_v5.onnx, vad.worklet.bundle.min.js
+  onnxWASMBasePath: "/ort/", // onnxruntime-web's *.wasm
+  options: { positiveSpeechThreshold: 0.5 }, // any other MicVAD option
+};
+```
+
+Or load the UMD builds by `<script>` from pinned URLs:
+
+```html
+<liagent-mic
+  slot="mic"
+  stt-url="/api/stt"
+  vad-src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.30/dist/"
+  ort-src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/"
+></liagent-mic>
+```
+
+If Silero fails to load (blocked wasm, an offline CDN, a CSP refusal), the
+mic falls back to the energy gate. A refused microphone is reported, and
+the fallback is not tried. With a CSP, allow the asset origin in
+`script-src` and `connect-src`, and add `'wasm-unsafe-eval'`.
+
+### The box contract (`DictationTarget`)
+
+The mic types into anything with this shape. `<liagent-chat>` is one, and
+your own input can be another:
+
+```ts
+interface DictationTarget {
+  readonly draft: string; // read before each transcript is appended
+  setDraft(next: string, opts?: { source?: "stt" }): void; // the dictated draft
+  setPartial(text: string | null): void; // dimmed live text after the draft; null = none left
+  submit(): boolean | void; // send now; false = it did not go out
+  micActive: boolean; // set while listening: no send by the typing debounce meanwhile
+}
+```
+
+To handle transcripts yourself instead, listen for `mic-text` and call
+`preventDefault()`. `dictate(target, text)` and `appendDictation(draft, text)`
+are exported for that.
+
+### Reference
+
+| Attribute / property             | Meaning                                                                                       |
+| -------------------------------- | --------------------------------------------------------------------------------------------- |
+| `stt-url` / `sttUrl`             | The STT endpoint (above).                                                                     |
+| `lang` / `lang`                  | The language hint (`?lang=`).                                                                 |
+| `.stt`                           | `(wav, info) => Promise<string \| { text }>`, used instead of `stt-url`.                      |
+| `.sttHeaders`, `.sttCredentials` | For the default request.                                                                      |
+| `vad-src`, `ort-src` / `.vad`    | Silero's source (above). None: the energy gate.                                               |
+| `aec`                            | `off`: no echo-cancelled barge-in; capture is held while the agent speaks (with a voice).     |
+| `tick`                           | A soft two-tone tick when a spoken sentence is sent (Web Audio; silent on a muted iPhone).    |
+| `storage-key`                    | The sessionStorage key of the reload flag (`liagent:mic`), read when the session is made.     |
+| `.box`                           | The `DictationTarget` (default: the closest `<liagent-chat>`).                                |
+| `.voice`                         | A `MicVoiceLink`: a voice output that reads replies hands-free (ducking, barge-in, the echo). |
+| `.strings`                       | The labels and error notes (`MIC_STRINGS_EN` lists them), e.g. translated.                    |
+| `.session`                       | The page's mic session: `view()`, `toggle()`, `off()`, `subscribe(f)`.                        |
+
+Events (they bubble and cross shadow roots):
+
+| Event           | `detail`                                                                        |
+| --------------- | ------------------------------------------------------------------------------- |
+| `mic-state`     | `{ state: "off" \| "loading" \| "listening" \| "capturing", status }`           |
+| `mic-text`      | `{ text }`: a final transcript, before it is typed; cancelable                  |
+| `mic-sent`      | `{ text }`: a spoken sentence went out                                          |
+| `mic-error`     | `{ error, note }`                                                               |
+| `mic-resume`    | `{ path: "auto", ok: true, permission }` or `{ path: "tap", reason }`           |
+| `mic-utterance` | `{ wav, seq, durationMs, text, echo? }`: each final utterance, if you keep them |
+
+**One session per page.** The stream, the VAD and the transcripts still in
+flight live on `globalThis`, not in the element. Removing the element,
+re-rendering it, or loading a second copy of the module re-attaches to the
+same session and keeps listening. Only a tap, Escape or `mic.session.off()`
+stops it. Transcripts that arrive while no element is attached are handed
+to the next one.
+
+**Reloads.** While the mic is on, the tab keeps `liagent:mic` in
+sessionStorage. After a reload it resumes without a gesture when the
+microphone permission is granted (or cannot be queried, as on iOS) and audio
+can start. Otherwise the button shows a dashed ring and "Tap to resume
+listening". Either way it fires `mic-resume`.
+
+**Privacy.** Audio goes only to the endpoint you configure, one utterance at
+a time. Nothing is recorded while the mic is off. The button shows a red
+ring and REC while it captures.
