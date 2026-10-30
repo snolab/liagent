@@ -66,6 +66,13 @@ Pairing prompts the user, so it is rationed:
     (listen backs off and tries again): no prompt was spent.
   - --no-pair (any command): only ever resume; never ask.
 
+  liagent progress [hub] --agent <name> --path /words/prefetch --task "…" --status doing --pct 40
+  liagent progress [hub] … --done --pr 12
+  liagent progress grant|resolve|show [hub] …
+      Report to the live state tree (a progress hub, not the chat hub):
+      one HTTP request with a bearer token ($LIAGENT_PROGRESS_TOKEN), hub
+      $LIAGENT_PROGRESS_HUB. "liagent progress --help" has every flag.
+
 [hub] is the hub's page-socket URL, e.g. https://dev.example.com/api/chat
 (its agent socket is <hub>/control). Default: $LIAGENT_HUB. Grants are kept
 in ~/.config/liagent/grants.json (mode 600; $LIAGENT_GRANTS overrides), one
@@ -76,6 +83,7 @@ import { deliveryText } from "./deliver.ts";
 import { type Scope, grantStore, privateAppend, spillTo } from "./grants.ts";
 import { PENDING_MS, type ChatMessage } from "./protocol.ts";
 import { type Place, listenLine, placeOf } from "./place.ts";
+import { runProgress } from "./progress-cli.ts";
 
 type Msg = Record<string, unknown> & { type?: string };
 
@@ -92,6 +100,8 @@ function usage(code = 0): never {
 const args = process.argv.slice(2);
 const cmd = args.shift();
 if (!cmd || cmd === "--help" || cmd === "-h" || cmd === "help") usage();
+// Its own flags (--agent is a report's assignee): handled before the chat commands parse theirs.
+if (cmd === "progress") process.exit(await runProgress(args));
 const flag = (name: string) => {
   const i = args.indexOf(name);
   if (i === -1) return undefined;

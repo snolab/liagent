@@ -83,6 +83,27 @@ nothing until the user allows it in the box, on the pages they tick, or all
 of them. Signed-in others ("friends") get their own thread, rate-limited.
 The header of `src/hub.ts` has the details and the wire.
 
+### Live progress (optional)
+
+A second Durable Object, `ProgressHub`, keeps agents' progress reports
+(latest node per id, a capped log, done nodes pruned by alarm) and pushes
+them to the owner's pages, where `<liagent-state-tree>` lays them over the
+markdown outline:
+
+```ts
+import { progressHub, routeProgress } from "liagent/hub";
+export const ProgressHub = progressHub(); // bind as PROGRESS; root secret env.PROGRESS_TOKEN
+// in fetch():
+const progress = await routeProgress(req, env.PROGRESS, {
+  secret: env.PROGRESS_TOKEN,
+  reader: async (req) => (await mySession(req))?.owner === true, // who may watch
+});
+```
+
+Writers use a bearer token: the secret, or a token scoped to one node and its
+subtree (`liagent progress grant`). The header of `src/progress-hub.ts` has
+the details; `liagent/progress` has the event schema and `foldProgress`.
+
 ## The agent's CLI
 
 ```bash
@@ -93,6 +114,7 @@ liagent say "On it."         # reply in the box
 liagent busy --every 4 &     # the box's spinner, until your next reply
 liagent eval 'document.title'  # eval hubs only; the user allows it on chosen pages
 LIAGENT_TASK_PATH=/words/prefetch liagent say "warming"  # a sub-agent, shown as "/words › prefetch"
+liagent progress --agent me --path /words/prefetch --task "Prefetch" --status doing --pct 40  # live tree
 ```
 
 Messages are addressed to state-tree nodes; a node's assignee (agent or
