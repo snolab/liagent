@@ -63,6 +63,12 @@ import {
   trimHistory,
 } from "./protocol.ts";
 import { DEBOUNCE_MS, afterChange, enterSends, lineBreakSends } from "./input.ts";
+import {
+  type StateTreeElement,
+  type TreeSource,
+  type TreeStrings,
+  defineStateTree,
+} from "./tree.ts";
 import { type AvatarSrc, type Sender, avatarColors, initialOf, lineAvatar } from "./avatar.ts";
 
 export {
@@ -308,6 +314,12 @@ export class ChatBox extends Base {
   private _warning = "";
   private _defaultOpen = true;
   private _placeholder = "Message the agent…";
+  private _treeSource?: TreeSource;
+  private treeEl?: StateTreeElement;
+  /** `owner/repo` that a bare `#123` in the tree links to. */
+  treeRepo?: string;
+  /** The tree's strings (English defaults). */
+  treeStrings: Partial<TreeStrings> = {};
   private _agentAvatar: AvatarSrc | Element | null = null;
   private _user: Sender = {};
   /** The nodes agents listen at: "@/…" completions. */
@@ -444,6 +456,43 @@ export class ChatBox extends Base {
   /** Open or collapsed on first visit (later visits remember). Attribute: collapsed. */
   set defaultOpen(v: boolean) {
     this._defaultOpen = !!v;
+  }
+  /**
+   * The state tree (src/tree.ts): a URL serving its markdown, a function
+   * returning markdown or nodes, or a feed `{subscribe(onUpdate) → unsubscribe}`.
+   * Set, the menu gets "Tree", which swaps the log for it; it reloads each
+   * time the menu opens. Unset, no Tree entry.
+   */
+  set treeSource(v: TreeSource | undefined) {
+    this._treeSource = v;
+    if (!v) this.setTree(false);
+    else if (this.treeEl) this.treeEl.source = v;
+    this.renderMenu();
+  }
+  get treeSource() {
+    return this._treeSource;
+  }
+  /** Show the tree in place of the log (true) or the log again (false). */
+  setTree(v: boolean) {
+    const log = this.els.log;
+    if (!log) return;
+    if (v && this._treeSource) {
+      defineStateTree();
+      const tree = (this.treeEl ??= document.createElement(
+        "liagent-state-tree",
+      ) as StateTreeElement);
+      tree.repo = this.treeRepo;
+      tree.strings = this.treeStrings;
+      tree.onBack = () => this.setTree(false);
+      tree.style.cssText = "max-height:45vh;overflow-y:auto;padding:6px 8px;pointer-events:auto";
+      if (!tree.isConnected) log.before(tree);
+      tree.source = this._treeSource;
+      log.hidden = true;
+    } else {
+      this.treeEl?.remove();
+      log.hidden = false;
+    }
+    this.renderMenu();
   }
   /**
    * The agent's avatar: your app's logo, as a URL (or URLs in fallback
@@ -892,6 +941,8 @@ export class ChatBox extends Base {
   private setMenu(v: boolean) {
     this.menuOpen = v;
     this.els.grip?.setAttribute("aria-expanded", String(v));
+    // Reopening the menu reloads the tree (no polling).
+    if (v && this.treeEl?.isConnected) this.treeEl.reload();
     this.renderMenu();
   }
 
@@ -1153,6 +1204,19 @@ export class ChatBox extends Base {
     min.textContent = "–  Minimize";
     min.addEventListener("click", () => this.setOpen(false));
     menu.append(status, speak, min);
+    if (this._treeSource) {
+      const showing = !!this.treeEl?.isConnected;
+      const tree = document.createElement("button");
+      tree.type = "button";
+      tree.setAttribute("role", "menuitemcheckbox");
+      tree.setAttribute("aria-checked", String(showing));
+      tree.textContent = `☰  ${this.treeStrings.tree ?? "Tree"}`;
+      tree.addEventListener("click", () => {
+        this.setMenu(false);
+        this.setTree(!showing);
+      });
+      menu.append(tree);
+    }
     for (const x of this._sessions) {
       const row = document.createElement("div");
       row.className = "sess";

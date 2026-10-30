@@ -47,6 +47,12 @@
       "import": "./dist/box.js",
       "default": "./dist/box.js"
     },
+    "./tree": {
+      "types": "./dist/tree.d.ts",
+      "browser": "./dist/tree.js",
+      "import": "./dist/tree.js",
+      "default": "./dist/tree.js"
+    },
     "./client": {
       "types": "./dist/client.d.ts",
       "browser": "./dist/client.js",

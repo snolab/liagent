@@ -277,6 +277,46 @@ rules:
 - Every user-visible string goes through the translation table.
 - Debug-only UI appears only in debug mode.
 
+## The state tree: what is in flight, what waits on the user
+
+A project can keep a hand-edited markdown outline of its work (for example
+`docs/state-tree.md`). The box shows it read-only: set `box.treeSource` and the
+menu gets **Tree**, which swaps the log for the outline (`<liagent-state-tree>`,
+`liagent/tree`). `frontierLines(parseTreeDoc(md))` gives three lines for a
+small space: ✓ the most recently done, ▶ in progress, › next.
+
+```
+## Heading                 a top-level node
+- [ ] open  [~] in progress  [!] blocked  [x] done
+  (!)                      waits on the user (shown before anything in progress)
+  (any order)              this item's children are unordered (else file order is work order)
+  (done 2026-10-30T01:12)  when a [x] item was done; the latest is "most recent"
+  … @owner / @slug#id      trailing assignee: @owner is the human, any other @slug an
+                           agent; #id is opaque, [A-Za-z0-9_-] up to 40 chars, never
+                           a host, pid or token. Children inherit it.
+  → command or URL         the item's action (a copy button)
+≈ done: 捷报频传 · doing: 多线并进 · next: 蓄势待发
+≈en done: Wins keep coming · doing: Many fronts at once · next: Ready to go
+#123 (with box.treeRepo) / owner/repo#45 / https://…   links
+```
+
+`box.treeSource` is a URL (fetched as markdown), a function returning markdown
+or nodes, or a feed `{ subscribe(onUpdate) → unsubscribe }` that pushes each
+version (a dev server's file watch, a progress socket). It is loaded when the
+tree opens and again each time the menu opens; nothing polls.
+
+Agents editing the tree:
+
+- Mark what you start `[~] … @your-lane`, and what you finish
+  `[x] … (done <ISO date>)`. Put anything that needs the user as `(!) … @owner`.
+- **When a group holds several items in one status, write a `≈` summary** on
+  the nearest node above them (or above the first `##`, for the whole tree):
+  in zh a four-character 成语, and a short `≈en` (or `≈ja`, …) phrase. The box
+  shows the line for the UI locale, then zh, then en, and the single item's
+  title when there is no summary. Nothing is generated at runtime.
+- Keep each item in one place, and keep personal information out: the file is
+  often public.
+
 ## Integrate liagent into another project
 
 Everything an agent needs to add liagent to a web project: the box on its
