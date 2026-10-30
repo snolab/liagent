@@ -6,6 +6,7 @@
 //   const tree = document.createElement("liagent-state-tree");
 //   tree.repo = "owner/app";                        // a bare #123 links there
 //   tree.source = "/state-tree.md";                 // or () => md, or {subscribe}
+//   tree.progress = "/api/progress";                // optional: live progress (progress-hub.ts)
 //   document.body.append(tree);
 //
 // It looks like the chat log: plain text lines with the page-coloured halo,
@@ -18,6 +19,10 @@
 //
 // frontierLines(root) builds the three-line summary (✓ ▶ ›) for a small
 // space such as a minimized chat bar.
+//
+// With `progress` (a progress hub's reader socket URL, or a ProgressFeed),
+// the source is the base and the hub's nodes are laid over it live
+// (liveTreeSource, progress-tree.ts's overlayProgress).
 //
 // Theming: --liagent-bg (the halo; default Canvas), --liagent-fg.
 
@@ -34,8 +39,19 @@ import {
   frontier,
   parseTreeDoc,
 } from "./state-tree.ts";
+import {
+  type FeedOptions,
+  type OverlayOptions,
+  type ProgressFeed,
+  overlayProgress,
+  progressFeed,
+} from "./progress-tree.ts";
 
 export * from "./state-tree.ts";
+export * from "./progress-tree.ts";
+
+/** What a source yields: markdown, top-level nodes, or a document root (parseTreeDoc's). */
+export type TreeValue = string | TreeNode[] | TreeNode;
 
 /**
  * Where the tree comes from: a URL (fetched as markdown), a function
@@ -44,10 +60,10 @@ export * from "./state-tree.ts";
  */
 export type TreeSource =
   | string
-  | (() => string | TreeNode[] | Promise<string | TreeNode[]>)
+  | (() => TreeValue | Promise<TreeValue>)
   | {
       subscribe: (
-        onUpdate: (v: string | TreeNode[], meta?: { live?: boolean }) => void,
+        onUpdate: (v: TreeValue, meta?: { live?: boolean }) => void,
         onError?: (e: unknown) => void,
       ) => () => void;
     };
@@ -93,15 +109,19 @@ export const TREE_STRINGS_EN: TreeStrings = {
   live: "Live",
 };
 
-const toRoot = (v: string | TreeNode[], opts: ParseOptions): TreeNode =>
-  typeof v === "string" ? parseTreeDoc(v, opts) : { title: "", links: [], children: v };
+const toRoot = (v: TreeValue, opts: ParseOptions): TreeNode =>
+  typeof v === "string"
+    ? parseTreeDoc(v, opts)
+    : Array.isArray(v)
+      ? { title: "", links: [], children: v }
+      : v;
 
 /** Load a URL or function source once into its document root. */
 export async function loadTree(
   source: Exclude<TreeSource, { subscribe: unknown }>,
   opts: ParseOptions = {},
 ): Promise<TreeNode> {
-  let v: string | TreeNode[];
+  let v: TreeValue;
   if (typeof source === "string") {
     const r = await fetch(source, { credentials: "same-origin", cache: "no-store" });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -137,6 +157,55 @@ export function watchTree(
   );
   return () => {
     alive = false;
+  };
+}
+
+export type LiveTreeOptions = OverlayOptions & {
+  /** The hand-edited outline: any TreeSource (a feed too: each push is overlaid again). */
+  base: TreeSource;
+  /** The progress hub's reader socket URL, a ProgressFeed, or the feed's options. */
+  progress: string | ProgressFeed | FeedOptions;
+};
+
+/**
+ * The outline with live progress laid over it: the base as it loads, then
+ * the overlay again on every hub message, with `meta.live` while the hub's
+ * socket is up. Without the hub (not deployed, not a reader) the outline
+ * shows as it is. Never polls.
+ */
+export function liveTreeSource(opts: LiveTreeOptions): TreeSource {
+  const { base, progress, ...overlay } = opts;
+  const feed: ProgressFeed =
+    typeof progress === "string"
+      ? progressFeed({ url: progress })
+      : "subscribe" in progress
+        ? progress
+        : progressFeed(progress);
+  return {
+    subscribe(onUpdate, onError) {
+      let root: TreeNode | null = null;
+      let rows: Parameters<typeof overlayProgress>[1] = [];
+      let live = false;
+      const push = () => root && onUpdate(overlayProgress(root, rows, overlay), { live });
+      const stopBase = watchTree(
+        base,
+        overlay,
+        (r) => {
+          root = r;
+          push();
+        },
+        (e) => onError?.(e),
+      );
+      const stopFeed = feed.subscribe((view, isLive) => {
+        rows = view.rows;
+        live = isLive;
+        push();
+      });
+      return () => {
+        stopBase();
+        stopFeed();
+      };
+    },
   };
 }
 
@@ -239,7 +308,7 @@ function marks(f: Frontier, t: TreeStrings): Map<string, Mark> {
 
 /** The read-only outline element. Properties in; `onBack` adds a back control. */
 export class StateTreeElement extends Base {
-  static observedAttributes = ["src"];
+  static observedAttributes = ["src", "progress"];
   /** Set: a ‹ control in the header calls it (the chat box's tree view). */
   onBack?: () => void;
   repo?: string;
@@ -248,6 +317,7 @@ export class StateTreeElement extends Base {
   storageKey = NEEDS_ME_KEY;
 
   private _source?: TreeSource;
+  private _progress?: string | ProgressFeed;
   private _root: TreeNode | null = null;
   private live = false;
   private error = "";
@@ -263,6 +333,17 @@ export class StateTreeElement extends Base {
   get source() {
     return this._source;
   }
+  /**
+   * Live progress over the source: a progress hub's reader socket URL
+   * (attribute `progress`) or a ProgressFeed. (Re)loads.
+   */
+  set progress(v: string | ProgressFeed | undefined) {
+    this._progress = v || undefined;
+    this.reload();
+  }
+  get progress() {
+    return this._progress;
+  }
   /** Set the parsed tree directly (parseTreeDoc's root). */
   set root(v: TreeNode | null) {
     this._root = v;
@@ -271,16 +352,20 @@ export class StateTreeElement extends Base {
   get root() {
     return this._root;
   }
-  attributeChangedCallback(_n: string, _o: string | null, v: string | null) {
-    if (v) this.source = v;
+  attributeChangedCallback(n: string, _o: string | null, v: string | null) {
+    if (n === "progress") this.progress = v ?? undefined;
+    else if (v) this.source = v;
   }
   /** Load the source again (the chat box calls this each time its menu opens). */
   reload() {
     this.stop?.();
     this.stop = undefined;
     if (!this._source || !this.isConnected) return;
+    const source = this._progress
+      ? liveTreeSource({ base: this._source, progress: this._progress, repo: this.repo })
+      : this._source;
     this.stop = watchTree(
-      this._source,
+      source,
       { repo: this.repo },
       (r, live) => {
         this._root = r;

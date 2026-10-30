@@ -343,6 +343,43 @@ Agents editing the tree:
 - Keep each item in one place, and keep personal information out: the file is
   often public.
 
+## Live progress: report as you work
+
+When the project hosts a progress hub (`liagent/hub`'s `ProgressHub`), report
+to it instead of (or as well as) editing the markdown: each report is one
+HTTP request, laid over the outline live by path, and the user sees it move
+without a reload. Report when you start, at milestones, when blocked, and
+when done, with the PR:
+
+```bash
+export LIAGENT_PROGRESS_HUB=https://example.com/api/progress
+export LIAGENT_PROGRESS_TOKEN=…            # given to you; never print or commit it
+export LIAGENT_AGENT=swipe-lane LIAGENT_TASK_PATH=/words/swipe
+liagent progress --task "Native swipe" --status doing --pct 40 --eta 15m
+liagent progress --task "Native swipe" --note "the test passes"     # notes append
+liagent progress --task "Native swipe" --status waiting-owner --needs "approve PR #12"
+liagent progress --task "Native swipe" --done --pr 12 --repo owner/app
+liagent progress grant --node /words/swipe/ios --agent ios-lane --ttl 8h  # a sub-agent's token
+liagent progress show                                               # the whole tree, JSON
+```
+
+- **Ids are paths** (`/words/swipe`, its parent `/words`, created as a group
+  if missing) or slugs (`--id <slug> --parent <id>`). Statuses: `doing`,
+  `blocked`, `waiting`, `waiting-owner`, `review`, `done`.
+- **Stay in your scope.** A scoped token writes its node and the subtree
+  below it, as its agent name only, until it expires; `grant` hands out a
+  narrower one (never outliving yours). Only the root (the hub's secret)
+  resolves.
+- **What waits on the user:** `--kind decision|approval`, `--status
+  waiting-owner`, or `--needs "…"` (`--needs ""` clears it). To put an item on
+  the user's own list, write `/@owner/<slug>` with `--ref <your node>` and
+  `--action "<the exact command or URL>"`. They check it off in the tree.
+- **Notes are public to every reader.** No secrets, tokens or personal data
+  in a task, note or link. Rate limits stop a loop: report on change, never on
+  a timer.
+- Done nodes leave the hub a day after their last write; the markdown is the
+  lasting record, so still mark finished work `[x]` there.
+
 ## Integrate liagent into another project
 
 Everything an agent needs to add liagent to a web project: the box on its
@@ -453,6 +490,28 @@ These are required:
   only with the owner's agreement. The page side also needs
   `connectHub(…, { evalCode: true })`.
 - **Keep message text out of logs.** Leave `logContent` off.
+
+#### The progress hub (optional)
+
+Live progress is a second Durable Object with its own route and secret. The
+CLI writes with a bearer token; readers are the owner's pages, and only your
+site knows who that is, so `reader(req)` decides:
+
+```ts
+import { progressHub, routeProgress } from "liagent/hub";
+export const ProgressHub = progressHub(); // bind as PROGRESS; secret: env.PROGRESS_TOKEN
+// in fetch(), before your own routes:
+const progress = await routeProgress(req, env.PROGRESS, {
+  secret: env.PROGRESS_TOKEN, // `wrangler secret put PROGRESS_TOKEN`; unset answers 503
+  reader: async (req) => (await mySession(req))?.isOwner === true,
+});
+if (progress) return progress;
+```
+
+Give the root secret only to the main agent; it mints scoped tokens for
+sub-agents (`liagent progress grant`). On the page, lay it over the outline:
+`tree.progress = "/api/progress"` on `<liagent-state-tree>`, or
+`box.treeSource = liveTreeSource({ base: "/state-tree.md", progress: "/api/progress" })`.
 
 ### 4. Pair the agent once
 

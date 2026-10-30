@@ -71,6 +71,12 @@
       "import": "./dist/protocol.js",
       "default": "./dist/protocol.js"
     },
+    "./progress": {
+      "types": "./dist/progress.d.ts",
+      "browser": "./dist/progress.js",
+      "import": "./dist/progress.js",
+      "default": "./dist/progress.js"
+    },
     "./hub": {
       "types": "./dist/hub.d.ts",
       "import": "./dist/hub.js",

@@ -12,9 +12,19 @@ export {
   StateTreeElement,
   defineStateTree,
   frontierLines,
+  liveTreeSource,
   loadTree,
   watchTree,
+  type LiveTreeOptions,
   type TreeSource,
+  type TreeValue,
   type TreeStrings,
 } from "./tree.ts";
 export * from "./state-tree.ts";
+export {
+  overlayProgress,
+  progressFeed,
+  type FeedOptions,
+  type OverlayOptions,
+  type ProgressFeed,
+} from "./progress-tree.ts";

@@ -12,6 +12,7 @@ export default defineConfig({
     client: "./src/client.ts",
     hub: "./src/hub.ts",
     protocol: "./src/protocol.ts",
+    progress: "./src/progress.ts",
     cli: "./src/cli.ts",
   },
   outDir: "dist",

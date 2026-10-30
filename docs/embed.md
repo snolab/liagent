@@ -415,6 +415,32 @@ draft is sent is in [`src/input.ts`](../src/input.ts):
 - on Android, on the line break itself;
 - at once, when dictation inserts more than 10 characters that end a sentence.
 
+### Live progress on the state tree
+
+With a progress hub mounted (`routeProgress`, see the README), the tree can
+show agents' reports live over the markdown outline:
+
+```js
+import { defineStateTree, liveTreeSource } from "liagent/tree";
+defineStateTree();
+const tree = document.createElement("liagent-state-tree");
+tree.repo = "owner/app"; // a report's --pr links here
+tree.source = "/state-tree.md"; // the base outline
+tree.progress = "/api/progress"; // the hub's reader socket (or attribute progress="…")
+document.body.append(tree);
+
+// The chat box's Tree view takes the same thing as a source:
+box.treeSource = liveTreeSource({ base: "/state-tree.md", progress: "/api/progress" });
+```
+
+A node `/words/prefetch` updates the outline's `## /words` › `prefetch` item
+(status, assignee, needs-you flag, pct, ETA and latest note, PR and links) or
+adds it there; slug ids go under a "Live" heading. The socket opens only if
+your `reader(req)` lets this page in; otherwise the outline shows as it is.
+It reconnects with backoff and never polls. `overlayProgress(root, entries)`
+is the pure function behind it, and `progressFeed({ url })` the socket
+(`feed.resolve(id)` checks a node off).
+
 ## 7. Security notes
 
 - **Cross-site WebSocket hijacking:** `routeChat` refuses a page socket

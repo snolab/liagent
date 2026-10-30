@@ -1452,3 +1452,6 @@ export async function routeChat(
   inner.pathname = "/page";
   return hub.fetch(new Request(inner, { headers }));
 }
+
+// The progress hub (live state-tree progress): its own Durable Object class.
+export * from "./progress-hub.ts";
