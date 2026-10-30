@@ -63,6 +63,21 @@ export const PAGE_DEBOUNCE_MS = 300;
  */
 export type Scope = "eval" | "chat";
 
+/** Picture URLs in fallback order: each that fails to load falls through to the next. */
+export type AvatarSrc = string | readonly string[];
+
+/**
+ * Who sent a line, for the box's avatar. Optional everywhere: the bundled
+ * hub does not set it, a host's hub may. `id` seeds the fallback colour:
+ * a stable id or a hash of one, never an email.
+ */
+export type Sender = {
+  id?: string;
+  name?: string;
+  /** In fallback order: the app's own avatar, then the sign-in provider's image. */
+  avatar?: AvatarSrc;
+};
+
 /** One line of the chat, as the hub stores and sends it. */
 export type ChatMessage = {
   id: string;
@@ -71,6 +86,8 @@ export type ChatMessage = {
   text: string;
   at: number;
   thread?: string;
+  /** Who sent it, for the avatar (absent: the box falls back, see src/avatar.ts). */
+  sender?: Sender;
 };
 
 /**

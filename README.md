@@ -41,12 +41,15 @@ const hub = connectHub(box, { url: "wss://example.com/api/chat" });
 ```
 
 Properties: `messages`, `live`, `listeners`, `sessions`, `pending`, `evalRan`,
-`busy`, `guest`, `notice`, `warning`, `defaultOpen`, `placeholder`.
-Callbacks: `onSend(text) → boolean`, `onAnswer(type, pair, scope?)`, `onEnd(pair)`.
+`busy`, `guest`, `notice`, `warning`, `defaultOpen`, `placeholder`, and the
+avatars: `agentAvatar` (set it to your app's logo), `userAvatar`, `userName`,
+`userId`.
+Callbacks: `onSend(text) → boolean`, `onAnswer(type, pair, scope?)`, `onEnd(pair)`,
+`avatarFor(message)` (a per-sender avatar).
 Attributes: `storage-key` (localStorage prefix, default `liagent`), `collapsed`,
-`placeholder`. Theme: `--liagent-bg` (set it to your page colour),
-`--liagent-fg`, `--liagent-you`, `--liagent-agent`, `--liagent-z`,
-`--liagent-width`.
+`placeholder`, `agent-avatar`, `user-avatar`, `user-name`. Theme: `--liagent-bg`
+(set it to your page colour), `--liagent-fg`, `--liagent-agent`, `--liagent-z`,
+`--liagent-width`, `--liagent-avatar`.
 
 [docs/embed.md](docs/embed.md) shows how to embed it: plain HTML, your own
 transport, React, Vue, Svelte, Angular, Solid and Preact (each with a runnable
