@@ -21,6 +21,7 @@
 import type { ChatBox } from "./box.ts";
 import {
   type ChatMessage,
+  type EditedEvent,
   PAGE_DEBOUNCE_MS,
   type HubState,
   type PairInfo,
@@ -198,6 +199,10 @@ export function connectHub(box: ChatBox, opts: HubOptions): HubConnection {
           if (m.from !== "agent") box.warning = "";
           return;
         }
+        case "edited":
+          // The agent polished a voice line: in place, never read aloud again.
+          box.edit(msg as unknown as EditedEvent);
+          return;
         case "eval":
           if (!opts.evalCode) return;
           if (typeof msg.id !== "string" || typeof msg.to !== "string") return;

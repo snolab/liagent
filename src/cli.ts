@@ -31,6 +31,15 @@ const USAGE = `liagent — the agent's side of the user ⇄ agent chat (src/hub.
       subtree and upward; anything else needs a grant (below), else
       {type:"error", reason:"out of scope: needs a grant from /words"}.
 
+  liagent edit   [hub] (<msgId> | --last) "polished text" | -
+      Polish the user's latest line when it came from the box's mic (it
+      carries "source":"stt" in listen's output): STT gets words wrong and
+      has no context. The hub keeps the first STT text as raw, marks the
+      line edited, and updates it in place in the box (never read aloud
+      again). Only the user's LATEST line, only stt, at most 3 times;
+      friends' lines never. --last targets the user's latest line. Prints
+      {type:"edited", id, thread, text, raw, edited}, or the rule it broke.
+
   liagent grant   [hub] --from /words/prefetch --to /words/audio [--hours 8]
   liagent ungrant [hub] --from /words/prefetch --to /words/audio
       Let senders within one node address another (or take it back): only
@@ -178,6 +187,9 @@ if (noPair) args.splice(args.indexOf("--no-pair"), 1);
 /** Pairing prompts the user, so a process asks at most once — never from a reconnect loop. */
 let pairedOnce = false;
 
+/** The history each approved socket was sent right after its approval (for `edit --last`). */
+const histories = new WeakMap<WebSocket, Promise<Msg[]>>();
+
 /** One socket: resume with `token`, or knock without one. Resolves once approved. */
 function attempt(hub: string, scope: Scope, token?: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
@@ -212,7 +224,20 @@ function attempt(hub: string, scope: Scope, token?: string): Promise<WebSocket> 
           console.error(
             `Approved (${m.scope}${m.pages === "all" ? ", all pages" : Array.isArray(m.pages) ? `, ${m.pages.length} page(s)` : ""}) until ${new Date(Number(m.until)).toLocaleString()}.`,
           );
-        ws.onmessage = null;
+        // The history follows the approval: keep it (a command may look at it).
+        histories.set(
+          ws,
+          new Promise<Msg[]>((resolve) => {
+            const t = setTimeout(() => resolve([]), 5_000);
+            ws.onmessage = (h) => {
+              const x = JSON.parse(String(h.data)) as Msg;
+              if (x.type !== "history") return;
+              clearTimeout(t);
+              ws.onmessage = null;
+              resolve(Array.isArray(x.messages) ? (x.messages as Msg[]) : []);
+            };
+          }),
+        );
         ws.onclose = null;
         done();
       } else if (m.type === "error" || m.type === "denied" || m.type === "expired")
@@ -412,7 +437,7 @@ async function cmdListen(hub: string) {
               ),
             );
           }
-        } else if (m.type === "friend-new" || m.type === "page-changed") {
+        } else if (m.type === "friend-new" || m.type === "page-changed" || m.type === "edited") {
           const line = JSON.stringify(m);
           console.log(line);
           if (out) privateAppend(out, `${line}\n`);
@@ -449,6 +474,33 @@ async function main() {
     return;
   }
   if (cmd === "listen") return cmdListen(hub);
+  if (cmd === "edit") {
+    const last = args.includes("--last");
+    if (last) args.splice(args.indexOf("--last"), 1);
+    const id = last ? undefined : args.shift();
+    const text = await readText();
+    if (!text || (!last && !id)) usage(2);
+    const ws = await connectOrExit(hub);
+    let target = id;
+    if (last) {
+      const list = (await histories.get(ws)) ?? [];
+      target = list.filter((x) => x.from === "owner" && (x.thread ?? "owner") === "owner").at(-1)
+        ?.id as string | undefined;
+      if (!target) {
+        console.error("liagent: the user has no line to polish");
+        process.exit(1);
+      }
+    }
+    try {
+      const r = await request(ws, { type: "edit", id: target, text }, "edited");
+      console.log(JSON.stringify(r));
+    } catch (e) {
+      console.error(`liagent: ${(e as Error).message}`);
+      process.exit(1);
+    }
+    ws.close();
+    return;
+  }
   if (cmd === "say") {
     const to = flag("--to");
     const text = await readText();

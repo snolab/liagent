@@ -49,6 +49,8 @@ import {
   BUSY_AFTER_REPLY_MS,
   BUSY_MS,
   type ChatMessage,
+  type EditedEvent,
+  applyEdit,
   MAX_CHAT,
   type PageInfo,
   type PairInfo,
@@ -141,6 +143,8 @@ export function when(at: number, now = new Date()) {
 const ICONS = {
   play: `<svg viewBox="0 0 16 16" width="9" height="9" aria-hidden="true"><path fill="currentColor" d="M4 2.5v11l9-5.5z"/></svg>`,
   lock: `<svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M5 7V5a3 3 0 0 1 6 0v2h1v7H4V7zm1.5 0h3V5a1.5 1.5 0 0 0-3 0z"/></svg>`,
+  /** The mark on a voice line the agent polished: a sparkle (four-point star and a small one). */
+  sparkle: `<svg viewBox="0 0 256 256" width="1em" height="1em" aria-hidden="true"><path fill="currentColor" d="M104,40Q112,136,200,144Q112,152,104,248Q96,152,8,144Q96,136,104,40ZM200,8Q204,48,244,52Q204,56,200,96Q196,56,156,52Q196,48,200,8Z"/></svg>`,
   speaker: `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M2 6h3l4-3v10l-4-3H2z"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.5 3.5a6 6 0 0 1 0 9" stroke="currentColor" fill="none" stroke-width="1.3"/></svg>`,
 };
 
@@ -220,6 +224,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .log li { display: flex; align-items: flex-start; gap: 6px; }
 .log .text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding-top: 1px; }
 .log .hint { opacity: .6; display: block; }
+.log .polished { all: unset; pointer-events: auto; cursor: pointer; margin-inline-start: 4px; font-size: .85em; opacity: .55; vertical-align: baseline; }
+.log .polished[aria-pressed="true"] { opacity: .9; }
+.log .raw { opacity: .65; }
 .log li.node { border-inline-start: 2px solid var(--node); padding-inline-start: 4px; }
 .log .sub { display: block; font-size: 10px; line-height: 1.2; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .aim { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 0 0 4px 30px; pointer-events: none; }
@@ -364,6 +371,17 @@ export class ChatBox extends Base {
     this.busy = false;
     this.speak(m.text);
   }
+  /**
+   * The agent polished a voice line ({type:"edited"}): it changes in place,
+   * and is never read aloud again.
+   */
+  edit(e: Omit<EditedEvent, "type">) {
+    if (!e || typeof e.id !== "string" || typeof e.text !== "string") return;
+    this._messages = this._messages.map((m) => applyEdit(m, e));
+    this.renderLog();
+  }
+  /** Polished lines shown as first heard (their mark tapped). */
+  private rawIds = new Set<string>();
   /**
    * One busy beat from the agent: the spinner shows for BUSY_MS unless the
    * next beat renews it or a reply ends it. A beat right after a reply
@@ -1156,7 +1174,26 @@ export class ChatBox extends Base {
       const sr = document.createElement("span");
       sr.className = "sr";
       sr.textContent = node ? `${who.name} (${node.subtitle}): ` : `${who.name}: `;
-      text.append(sr, document.createTextNode(m.text));
+      if (m.edited && m.raw !== undefined) {
+        // A polished voice line: its text (or, tapped, the raw STT text) and a sparkle.
+        const raw = this.rawIds.has(m.id);
+        const body = document.createElement("span");
+        if (raw) body.className = "raw";
+        body.textContent = raw ? m.raw : m.text;
+        const mark = document.createElement("button");
+        mark.type = "button";
+        mark.className = "polished";
+        mark.title = "Polished";
+        mark.setAttribute("aria-label", "Polished");
+        mark.setAttribute("aria-pressed", String(raw));
+        mark.innerHTML = ICONS.sparkle;
+        mark.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          if (!this.rawIds.delete(m.id)) this.rawIds.add(m.id);
+          this.renderLog();
+        });
+        text.append(sr, body, mark);
+      } else text.append(sr, document.createTextNode(m.text));
       li.append(avatarEl(who.srcs, who.node, who.name, initialOf(who.initialFrom), who.seed), text);
       log.append(li);
     }

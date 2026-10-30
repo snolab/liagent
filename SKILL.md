@@ -122,6 +122,32 @@ echo "a longer reply" | liagent say -
 A plain `say` goes to the user's own thread. Reply to a friend only with
 `--to` and their email.
 
+## Agent edits of voice messages
+
+STT gets words wrong, and it has no context on the conversation; you do. A
+user line that came from the box's own mic carries `"source":"stt"` in
+`listen`'s output. You may **polish the user's latest line** when it does:
+
+```bash
+liagent edit --last "Fix the sync button on /words."
+liagent edit <msgId> "Fix the sync button on /words."
+```
+
+The hub (`{type:"edit", id, text}`) accepts it only if: you hold a live
+grant from the user (chat or eval; never a friend's preview pairing), the
+line is the user's **latest** in their own thread (your replies after it do
+not count), it is `source: "stt"`, it was polished fewer than 3 times
+(`MAX_EDITS`), and the text changes. Friends' lines can never be edited. The
+first STT text stays as `raw`, the line gets `edited: {at, by, count}`, and
+every page and listener hears `{type:"edited", id, thread, text, raw,
+edited}`: the box updates the line in place (never reading it aloud again)
+and shows a muted sparkle ("Polished"); a tap shows the raw text. Fix
+misheard words, names and punctuation only — never change what was meant.
+
+The box itself has no mic yet: a host page with its own STT sends
+`{type:"chat", id, text, source:"stt"}` for a line the mic produced and the
+user did not change (`dictatedDraft` / `draftSource` in src/protocol.ts).
+
 ## Busy: show you are working
 
 ```bash

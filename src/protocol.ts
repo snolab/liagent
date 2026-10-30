@@ -5,7 +5,8 @@
 //
 // Wire (JSON text frames). An agent knocks on <hub>/control?scope=chat|eval
 // (&label=…, &for=<friend email>); a grant token resumes with x-liagent-token.
-//   page → hub        {type:"chat", id, text, to?}   (to: a state-tree node path)
+//   page → hub        {type:"chat", id, text, to?, source?}   (to: a state-tree node path;
+//                                                     source "stt": from the mic, unchanged)
 //                     {type:"allow", pair, pages?: string[] | "all"} | {type:"deny"|"revoke", pair}
 //                     {type:"page", label}            (client-side navigation)
 //                     {type:"end-page", id}           (close one of the owner's pages)
@@ -13,11 +14,14 @@
 //   hub → page        {type:"state", pending, sessions, listeners, pages, self}
 //                     {type:"history", messages} | {type:"chat", message}
 //                     {type:"busy", label, at} | {type:"eval", id, code, to}
+//                     {type:"edited", id, thread, text, raw, edited}   (a voice line polished)
 //   agent → hub       {type:"say", text, to?, taskPath?, agentId?} | {type:"busy", to?}
 //                     {type:"eval", code, target?} | {type:"grant"|"ungrant", from, to, ms?}
+//                     {type:"edit", id, text}   (polish the owner's latest stt line)
 //   hub → agent       {type:"pending", code} | {type:"approved", until, scope, pages, token?}
 //                     {type:"history"|"chat", …} | {type:"page-changed", label, thread, at}
 //                     {type:"said", id} | {type:"sent", id, delivered} | {type:"result", …}
+//                     {type:"edited", id, thread, text, raw, edited}
 //                     {type:"error", error, reason?} | {type:"denied"|"revoked"|"expired"}
 //                     {type:"granted"|"ungranted", from, to, until?}
 //
@@ -102,7 +106,60 @@ export type ChatMessage = {
   agentId?: string;
   /** The node the line is addressed to (absent or "/" = the main thread). */
   to?: string;
+  /**
+   * "stt": the owner's line came from the box's own mic — an STT final sent
+   * as heard, or sent unchanged. Absent = typed (or dictation edited before
+   * sending). Only such a line may be polished by the agent (`edit`).
+   */
+  source?: MessageSource;
+  /** The STT text as first heard, kept once the agent has polished the line. */
+  raw?: string;
+  /** Set when the agent polished the line: when, by which agent, and how many times. */
+  edited?: EditMark;
 };
+
+/** Where an owner line came from: "stt" (the box's mic). Absent = typed. */
+export type MessageSource = "stt";
+/** An agent's polish of a voice line (ChatMessage.edited). */
+export type EditMark = { at: number; by: string; count: number };
+/** How many times the agent may polish one voice line. */
+export const MAX_EDITS = 3;
+/**
+ * The hub's broadcast after an agent polished a voice line: the pages and
+ * listeners update that line in place (never read aloud again).
+ */
+export type EditedEvent = {
+  type: "edited";
+  id: string;
+  thread: string;
+  text: string;
+  raw: string;
+  edited: EditMark;
+};
+
+/** A message updated by an EditedEvent; any other message is returned as is. */
+export function applyEdit<M extends ChatMessage>(m: M, e: Omit<EditedEvent, "type">): M {
+  if (m.id !== e.id || (m.thread ?? "owner") !== e.thread) return m;
+  return { ...m, text: e.text, raw: e.raw, edited: e.edited };
+}
+
+/**
+ * The draft after a transcript landed in it, if the whole draft is still
+ * dictation (the draft was empty, or is exactly what dictation left there);
+ * null once anything typed is in it.
+ */
+export function dictatedDraft(prev: string, pure: string | null, next: string): string | null {
+  return !prev.trim() || prev === pure ? next : null;
+}
+
+/**
+ * A line's source as it is sent: "stt" when the draft is exactly what the
+ * mic left there (sent as heard, or unchanged); undefined when anything was
+ * typed or edited in it.
+ */
+export function draftSource(draft: string, pure: string | null): MessageSource | undefined {
+  return pure !== null && draft === pure && !!draft.trim() ? "stt" : undefined;
+}
 
 /**
  * A pairing: waiting for the owner's answer (no `until`), or approved.
@@ -148,6 +205,8 @@ export type ControllerMessage =
       agentId?: string;
     }
   | { type: "busy"; to?: string; on?: boolean }
+  /** Polish the owner's latest line, when it came from the box's mic (`source: "stt"`). */
+  | { type: "edit"; id: string; text: string }
   /** Let senders within node `from` address nodes within `to` (only a listener holding both). */
   | { type: "grant"; from: string; to: string; ms?: number }
   | { type: "ungrant"; from: string; to: string };
@@ -157,7 +216,8 @@ export type PageMessage =
   | { type: "deny" | "revoke"; pair: string }
   | { type: "page"; label: string }
   | { type: "end-page"; id: string }
-  | { type: "chat"; id: string; text: string; to?: string }
+  /** `source: "stt"`: sent from the box's mic, unchanged (absent = typed). */
+  | { type: "chat"; id: string; text: string; to?: string; source?: MessageSource }
   | {
       type: "result";
       id: string;
@@ -216,6 +276,13 @@ export function parseControllerMessage(
     if (agentId) value.agentId = agentId;
     return { ok: true, value };
   }
+  if (m?.type === "edit") {
+    const id = str(m.id, 64)?.trim();
+    if (!id) return { ok: false, error: "edit needs the id of the message to polish" };
+    const text = chatText(m.text);
+    if (!text) return { ok: false, error: `edit needs text of 1–${MAX_CHAT} chars` };
+    return { ok: true, value: { type: "edit", id, text } };
+  }
   if (m?.type === "grant" || m?.type === "ungrant") {
     const from = nodePath(m.from);
     const to = nodePath(m.to);
@@ -235,7 +302,7 @@ export function parseControllerMessage(
     return {
       ok: false,
       error:
-        'expected {"type":"say","text":"…"}, {"type":"eval","code":"…"} or {"type":"grant","from","to"}',
+        'expected {"type":"say","text":"…"}, {"type":"eval","code":"…"}, {"type":"edit","id","text"} or {"type":"grant","from","to"}',
     };
   if (typeof m.code !== "string" || !m.code.trim()) return { ok: false, error: "empty code" };
   if (m.code.length > MAX_CODE) return { ok: false, error: `code over ${MAX_CODE} chars` };
@@ -280,7 +347,10 @@ export function parsePageMessage(raw: unknown): PageMessage | null {
     if (!id || !text) return null;
     // An address that is not a node path is dropped: the line goes to the main thread.
     const to = nodePath(m.to);
-    return to && to !== ROOT_NODE ? { type: "chat", id, text, to } : { type: "chat", id, text };
+    const out: PageMessage = { type: "chat", id, text };
+    if (to && to !== ROOT_NODE) out.to = to;
+    if (m.source === "stt") out.source = "stt";
+    return out;
   }
   if (m.type === "result") {
     const id = str(m.id, 64);
