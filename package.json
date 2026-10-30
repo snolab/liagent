@@ -53,6 +53,12 @@
       "import": "./dist/ui.js",
       "default": "./dist/ui.js"
     },
+    "./mic": {
+      "types": "./dist/mic.d.ts",
+      "browser": "./dist/mic.js",
+      "import": "./dist/mic.js",
+      "default": "./dist/mic.js"
+    },
     "./tree": {
       "types": "./dist/tree.d.ts",
       "browser": "./dist/tree.js",

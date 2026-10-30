@@ -454,6 +454,20 @@ Framework notes (details and a runnable page for each in docs/embed.md):
 Mount it only where it is wanted (for example the site owner's pages, or a
 debug mode), and keep `evalCode` off unless step 3 enables eval.
 
+**Voice input (optional).** Put `<liagent-mic slot="mic" stt-url="/api/stt">`
+inside the box (`defineMic()` from `liagent/mic`). The user then dictates,
+and each spoken sentence is sent as a chat line. liagent has no STT backend,
+so the host must provide one. The endpoint takes `POST` with a 16 kHz mono
+WAV body (`content-type: audio/wav`, optional `?lang=`) and answers
+`{ "text": "…" }`. A 401 turns the mic off and a 429 asks the user to wait.
+Point `stt-url` at an existing endpoint (a Workers AI or Whisper route), or
+set `mic.stt = (wav, info) => …` for another protocol. Silero VAD is opt-in:
+set `mic.vad = () => import("@ricky0123/vad-web")` with its asset paths, or
+set the `vad-src`/`ort-src` attributes. Otherwise an energy gate is used.
+Lines dictated this way arrive with `source: "stt"` once the box passes it
+through, so you can tell them from typed lines. Details are in
+docs/embed.md, "Voice input".
+
 ### 3. Host the hub yourself
 
 The hub must run behind your own authentication; only your site knows who
