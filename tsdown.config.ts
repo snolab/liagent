@@ -9,6 +9,7 @@ export default defineConfig({
     box: "./src/box.ts",
     tree: "./src/tree.ts",
     ui: "./src/ui.ts",
+    mic: "./src/mic-button.ts",
     client: "./src/client.ts",
     hub: "./src/hub.ts",
     protocol: "./src/protocol.ts",

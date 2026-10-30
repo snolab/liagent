@@ -16,6 +16,7 @@ bun add liagent
 | `liagent`                                           | the box, `connectHub`, and the protocol (browser)                                                       |
 | `liagent/box`, `liagent/client`, `liagent/protocol` | each part on its own                                                                                    |
 | `liagent/ui`                                        | the box's pure parts (tree nav, detents, floating lines, echo guard…), for hosts that draw their own UI |
+| `liagent/mic`                                       | `<liagent-mic>`: voice input into the box (VAD, your STT endpoint), and its pure parts                  |
 | `liagent/hub`                                       | the hub (a Cloudflare Durable Object) and `routeChat`                                                   |
 | `liagent/liagent.js`                                | the standalone browser bundle, for `import()` from a URL                                                |
 | `liagent` (bin)                                     | the agent's CLI (needs Bun)                                                                             |
@@ -56,6 +57,30 @@ Attributes: `storage-key` (localStorage prefix, default `liagent`), `collapsed`,
 transport, React, Vue, Svelte, Angular, Solid and Preact (each with a runnable
 page under `examples/`), and a full reference. See the header of `src/box.ts` for the behaviour, and `src/input.ts` for when
 a draft is sent.
+
+## Voice input
+
+```html
+<liagent-chat>
+  <liagent-mic slot="mic" stt-url="/api/stt"></liagent-mic>
+</liagent-chat>
+<script type="module">
+  const { defineMic } = await import("liagent/mic");
+  defineMic();
+</script>
+```
+
+`<liagent-mic>` listens until tapped again. A voice-activity detector cuts
+speech into utterances, each one is POSTed to **your** STT endpoint as a
+16 kHz mono WAV, and the transcript lands in the box's draft. A spoken
+sentence is punctuated and sent at once. liagent ships no STT backend: point
+`stt-url` at one you run (the request and the JSON answer are in
+[docs/embed.md](docs/embed.md#8-voice-input)), or set `mic.stt` to your own
+function. Silero VAD (`@ricky0123/vad-web`) is optional and loaded only if
+you hand it over (`mic.vad = () => import("@ricky0123/vad-web")`, or the
+`vad-src`/`ort-src` attributes). Without it an energy gate cuts the
+utterances. The mic is one session per page: it survives remounts, and a
+reload with the mic on resumes listening.
 
 ## The hub
 
