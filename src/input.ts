@@ -51,3 +51,19 @@ export function afterChange(
   if (text.length - settledLen > BURST_CHARS && ENDS_SENTENCE.test(text.trim())) return "send";
   return text.trim() ? "arm" : "idle";
 }
+
+const CJK_START =
+  /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}　-〿＀-￯]/u;
+const CJK_END = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}　-〿＀-￯]$/u;
+
+/**
+ * What a live (not yet final) transcript adds after the draft, as shown
+ * dimmed in the input: a space between two words, none after a space or a
+ * line break, or next to CJK text. Empty for no partial.
+ */
+export function partialTail(draft: string, partial: string | null | undefined): string {
+  const p = (partial ?? "").trim();
+  if (!p) return "";
+  if (!draft || /\s$/.test(draft) || CJK_END.test(draft) || CJK_START.test(p)) return p;
+  return ` ${p}`;
+}
