@@ -71,6 +71,8 @@ export interface MicVoiceLink {
   echoDropped?(): void;
   /** Called in the tap that turns the mic on (a gesture: iOS lets audio play later). */
   unlock?(): void;
+  /** An interruption is over (a spoken line was sent, the input lost focus): read on. */
+  resume?(): void;
 }
 
 export type MicView = {

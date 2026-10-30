@@ -394,6 +394,15 @@ export class MicElement extends Base {
     };
     document.addEventListener("keydown", esc);
     this.off.push(() => document.removeEventListener("keydown", esc));
+    // The box's input losing focus with the mic on ends a typing pause: read on.
+    const box = this.box as unknown as EventTarget | null;
+    if (box && typeof box.addEventListener === "function") {
+      const out = () => {
+        if (s.view().state !== "off") s.voice()?.resume?.();
+      };
+      box.addEventListener("focusout", out);
+      this.off.push(() => box.removeEventListener("focusout", out));
+    }
   }
 
   disconnectedCallback() {
@@ -426,6 +435,8 @@ export class MicElement extends Base {
     const box = this.box;
     if (!box || !dictate(box, text)) return;
     this.fire("mic-sent", { text });
+    // Sent: an interruption (the user talking, typing) is over, and the reading goes on.
+    this._session?.voice()?.resume?.();
     this.playTick();
   }
 

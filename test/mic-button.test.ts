@@ -21,6 +21,11 @@ import {
   vadFromScripts,
 } from "../src/mic-audio.ts";
 import type { VadEvents } from "../src/mic.ts";
+import type { ChatBox } from "../src/box.ts";
+
+// <liagent-chat> is a DictationTarget (a compile-time check: the contract both sides implement).
+const _boxIsTarget = (b: ChatBox): DictationTarget => b;
+void _boxIsTarget;
 
 /** A chat box in memory, with the shape <liagent-chat> gives the mic. */
 function fakeBox(draft = "", accept = true) {
