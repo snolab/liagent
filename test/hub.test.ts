@@ -18,6 +18,7 @@ import {
   CHAT_HISTORY,
   CHAT_MS,
   EVAL_GRANT_MS,
+  MAX_EDITS,
   PAGES_GONE_MS,
   PENDING_MS,
 } from "../src/protocol.ts";
@@ -1561,5 +1562,185 @@ describe("ChatHub node paths (messages addressed to state-tree nodes)", () => {
     expect(chats(at["/words/audio"]!).map((m) => m.text)).toEqual(["hey"]);
     // The root saw all of it.
     expect(chats(root).map((m) => m.text)).toEqual(["do X", "done", "hey"]);
+  });
+});
+
+describe("ChatHub agent edits of voice messages", () => {
+  const agent = async (s: ReturnType<typeof setup>, owner: FakeSocket, label = "main lane") => {
+    const c = s.controller(label);
+    await s.msg(owner, { type: "allow", pair: s.pairOf(owner), scope: "chat" });
+    return { c, token: c.last("approved")?.token as string };
+  };
+  const voice = (id: string, text: string) => ({ type: "chat", id, text, source: "stt" });
+  const stored = (s: ReturnType<typeof setup>) =>
+    [...s.storage.store.entries()]
+      .filter(([k]) => k.startsWith("msg:"))
+      .map(([, v]) => v as Record<string, unknown>);
+  const tick0 = () => new Promise((r) => setTimeout(r, 0));
+
+  it("a page's voice line carries source stt; a typed one none", async () => {
+    const s = setup();
+    const owner = s.page();
+    const { c } = await agent(s, owner);
+    await s.msg(owner, voice("v1", "hello world"));
+    await s.msg(owner, { type: "chat", id: "t1", text: "typed", source: "keyboard" });
+    expect(chats(c).map((m) => (m as { source?: string }).source)).toEqual(["stt", undefined]);
+  });
+
+  it("polishes the owner's latest stt line: raw kept, edited marked, stored, broadcast", async () => {
+    const s = setup();
+    const owner = s.page();
+    const mac = s.page("/list Macintosh");
+    const { c } = await agent(s, owner);
+    await s.msg(owner, voice("v1", "fix the sink button"));
+    s.tick(5);
+    await s.msg(c, { type: "edit", id: "v1", text: "Fix the sync button." });
+    const ev = {
+      type: "edited",
+      id: "v1",
+      thread: "owner",
+      text: "Fix the sync button.",
+      raw: "fix the sink button",
+      edited: { at: 1_000_005, by: "main lane", count: 1 },
+    };
+    expect(owner.last("edited")).toEqual(ev);
+    expect(mac.last("edited")).toEqual(ev);
+    expect(c.last("edited")).toEqual(ev);
+    expect(stored(s)[0]).toMatchObject({
+      id: "v1",
+      text: "Fix the sync button.",
+      raw: "fix the sink button",
+      source: "stt",
+      edited: { by: "main lane", count: 1 },
+    });
+    expect((await s.hub.history())[0]).toMatchObject({
+      text: "Fix the sync button.",
+      raw: "fix the sink button",
+    });
+    const late = s.page();
+    await tick0();
+    const hist = (late.last("history") as { messages: Record<string, unknown>[] }).messages;
+    expect(hist[0]).toMatchObject({ text: "Fix the sync button.", raw: "fix the sink button" });
+    expect(chats(owner)).toHaveLength(1);
+  });
+
+  it("keeps the first raw across edits, and stops after MAX_EDITS", async () => {
+    const s = setup();
+    const owner = s.page();
+    const { c } = await agent(s, owner);
+    await s.msg(owner, voice("v1", "raw one"));
+    for (const t of ["two", "three", "four"]) await s.msg(c, { type: "edit", id: "v1", text: t });
+    expect(owner.last("edited")).toMatchObject({ text: "four", raw: "raw one" });
+    expect((owner.last("edited") as { edited: { count: number } }).edited.count).toBe(MAX_EDITS);
+    await s.msg(c, { type: "edit", id: "v1", text: "five" });
+    expect(c.last("error")?.error).toContain(`already polished ${MAX_EDITS} times`);
+    expect(stored(s)[0]).toMatchObject({ text: "four", raw: "raw one" });
+  });
+
+  it("refuses a typed line", async () => {
+    const s = setup();
+    const owner = s.page();
+    const { c } = await agent(s, owner);
+    await s.msg(owner, { type: "chat", id: "t1", text: "typed" });
+    await s.msg(c, { type: "edit", id: "t1", text: "Typed." });
+    expect(c.last("error")?.error).toContain("typed, not spoken");
+    expect(owner.last("edited")).toBeUndefined();
+  });
+
+  it("refuses any but the owner's latest line; agent replies after it do not count", async () => {
+    const s = setup();
+    const owner = s.page();
+    const { c } = await agent(s, owner);
+    await s.msg(owner, voice("v1", "first"));
+    await s.msg(owner, voice("v2", "second"));
+    await s.msg(c, { type: "say", text: "on it" });
+    await s.msg(c, { type: "edit", id: "v1", text: "First." });
+    expect(c.last("error")?.error).toContain("not the owner's latest");
+    await s.msg(c, { type: "edit", id: "v2", text: "Second." });
+    expect(owner.last("edited")).toMatchObject({ id: "v2", text: "Second." });
+    const said = c.last("said")?.id as string;
+    await s.msg(c, { type: "edit", id: said, text: "x" });
+    expect(c.last("error")?.error).toContain("not the owner's latest");
+  });
+
+  it("refuses an unknown id, an unchanged text, and empty or missing fields", async () => {
+    const s = setup();
+    const owner = s.page();
+    const { c } = await agent(s, owner);
+    await s.msg(owner, voice("v1", "same"));
+    await s.msg(c, { type: "edit", id: "nope", text: "x" });
+    expect(c.last("error")?.error).toContain("no message nope");
+    await s.msg(c, { type: "edit", id: "v1", text: "same" });
+    expect(c.last("error")?.error).toContain("already reads that way");
+    await s.msg(c, { type: "edit", id: "v1", text: "  " });
+    expect(c.last("error")?.error).toContain("edit needs text");
+    await s.msg(c, { type: "edit", text: "x" });
+    expect(c.last("error")?.error).toContain("edit needs the id");
+    expect(owner.last("edited")).toBeUndefined();
+  });
+
+  it("a friend's lines and thread can never be edited, voice or not", async () => {
+    const s = setup();
+    const owner = s.page();
+    const { c, token } = await agent(s, owner);
+    const f = await s.friend("f1", "f1@x.com");
+    await s.msg(f, voice("fv", "friend voice"));
+    expect((chats(c).at(-1) as { source?: string }).source).toBeUndefined();
+    await s.msg(c, { type: "edit", id: "fv", text: "Friend voice." });
+    expect(c.last("error")?.error).toContain("friends' lines can never be edited");
+    const preview = await s.forFriend(token, "f1@x.com");
+    await s.msg(f, {
+      type: "allow",
+      pair: (f.last("state") as { pending: { pair: string } }).pending.pair,
+    });
+    await s.msg(preview, { type: "edit", id: "fv", text: "x" });
+    expect(preview.last("error")?.error).toBe("a pairing for a friend cannot edit");
+    expect(f.last("edited")).toBeUndefined();
+  });
+
+  it("needs an approved controller holding a live owner grant", async () => {
+    const s = setup();
+    const owner = s.page();
+    const { c, token } = await agent(s, owner);
+    await s.msg(owner, voice("v1", "hello"));
+    const stranger = s.controller("stranger");
+    await s.msg(stranger, { type: "edit", id: "v1", text: "Hello." });
+    expect(stranger.last("error")?.error).toBe("not approved yet");
+    s.storage.store.delete(`grant:${await hashToken(token)}`);
+    await s.msg(c, { type: "edit", id: "v1", text: "Hello." });
+    expect(c.last("error")?.error).toBe("edit needs a live chat grant from the owner");
+    expect(owner.last("edited")).toBeUndefined();
+  });
+
+  it("an eval grant may edit too (eval implies chat); an expired one may not", async () => {
+    const s = setup();
+    const owner = s.page();
+    const c = s.controller("eval lane", "eval");
+    await s.msg(owner, { type: "allow", pair: s.pairOf(owner) });
+    expect(c.last("approved")).toMatchObject({ scope: "eval" });
+    await s.msg(owner, voice("v1", "hello"));
+    await s.msg(c, { type: "edit", id: "v1", text: "Hello." });
+    expect(owner.last("edited")).toMatchObject({ text: "Hello." });
+    s.tick(EVAL_GRANT_MS + 1);
+    await s.msg(owner, voice("v2", "later"));
+    await s.msg(c, { type: "edit", id: "v2", text: "Later." });
+    expect(c.last("expired")).toBeTruthy();
+    expect(owner.last("edited")).toMatchObject({ id: "v1" });
+  });
+
+  it("names the agent by its assignee when it has one", async () => {
+    const s = setup();
+    const owner = s.page();
+    const ws = new FakeSocket();
+    s.sockets.push(ws);
+    void s.hub.connectController(
+      ws,
+      new URL("https://example.com/api/chat/control?label=lane&scope=chat&agent=chat-lane"),
+      null,
+    );
+    await s.msg(owner, { type: "allow", pair: s.pairOf(owner), scope: "chat" });
+    await s.msg(owner, voice("v1", "hi"));
+    await s.msg(ws, { type: "edit", id: "v1", text: "Hi." });
+    expect((owner.last("edited") as { edited: { by: string } }).edited.by).toBe("chat-lane");
   });
 });

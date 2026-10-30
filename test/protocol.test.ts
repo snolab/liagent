@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   MAX_CHAT,
+  type ChatMessage,
+  applyEdit,
+  dictatedDraft,
+  draftSource,
   chatText,
   cleanLabel,
   matchesTarget,
@@ -158,4 +162,50 @@ test("summarize survives cycles and odd values", () => {
   expect(summarize(a)).toBe('{"n":"1n","self":"[circular]"}');
   expect(summarize(undefined)).toBe('"[undefined]"');
   expect(summarize("x".repeat(20), 5)).toBe('"xxxx…[17 more]');
+});
+
+describe("voice edits on the wire", () => {
+  test("a page's chat keeps source stt and drops any other source", () => {
+    expect(
+      parsePageMessage(JSON.stringify({ type: "chat", id: "a", text: "hi", source: "stt" })),
+    ).toEqual({ type: "chat", id: "a", text: "hi", source: "stt" });
+    expect(
+      parsePageMessage(JSON.stringify({ type: "chat", id: "a", text: "hi", source: "x" })),
+    ).toEqual({ type: "chat", id: "a", text: "hi" });
+  });
+
+  test("a controller's edit needs an id and text", () => {
+    expect(
+      parseControllerMessage(JSON.stringify({ type: "edit", id: "m1", text: " Hi. " })),
+    ).toEqual({ ok: true, value: { type: "edit", id: "m1", text: "Hi." } });
+    expect(parseControllerMessage(JSON.stringify({ type: "edit", text: "Hi." })).ok).toBe(false);
+    expect(parseControllerMessage(JSON.stringify({ type: "edit", id: "m1", text: "" })).ok).toBe(
+      false,
+    );
+  });
+
+  test("a draft is stt only while nothing typed is in it", () => {
+    const a = dictatedDraft("", null, "hello there");
+    expect(draftSource("hello there", a)).toBe("stt");
+    expect(draftSource("hello there!", a)).toBeUndefined();
+    const b = dictatedDraft("hello there", a, "hello there. And more");
+    expect(draftSource("hello there. And more", b)).toBe("stt");
+    expect(dictatedDraft("typed ", null, "typed and spoken")).toBeNull();
+    expect(draftSource("typed and spoken", null)).toBeUndefined();
+    expect(draftSource("", "")).toBeUndefined();
+  });
+
+  test("applyEdit updates only the matching line of the matching thread", () => {
+    const e = {
+      id: "m1",
+      thread: "owner",
+      text: "Hi.",
+      raw: "hi",
+      edited: { at: 1, by: "a", count: 1 },
+    };
+    const m: ChatMessage = { id: "m1", from: "owner", label: "", text: "hi", at: 0, source: "stt" };
+    expect(applyEdit(m, e)).toEqual({ ...m, text: "Hi.", raw: "hi", edited: e.edited });
+    expect(applyEdit({ ...m, id: "m2" }, e)).toEqual({ ...m, id: "m2" });
+    expect(applyEdit({ ...m, thread: "f1" }, e)).toEqual({ ...m, thread: "f1" });
+  });
 });
