@@ -17,6 +17,7 @@ bun add liagent
 | `liagent/box`, `liagent/client`, `liagent/protocol` | each part on its own                                                                                    |
 | `liagent/ui`                                        | the box's pure parts (tree nav, detents, floating lines, echo guard…), for hosts that draw their own UI |
 | `liagent/mic`                                       | `<liagent-mic>`: voice input into the box (VAD, your STT endpoint), and its pure parts                  |
+| `liagent/voice`                                     | hands-free voice out: a sentence queue, barge-in, ducking, the echo guard, your TTS endpoint (optional) |
 | `liagent/hub`                                       | the hub (a Cloudflare Durable Object) and `routeChat`                                                   |
 | `liagent/liagent.js`                                | the standalone browser bundle, for `import()` from a URL                                                |
 | `liagent` (bin)                                     | the agent's CLI (needs Bun)                                                                             |
@@ -90,6 +91,21 @@ you hand it over (`mic.vad = () => import("@ricky0123/vad-web")`, or the
 `vad-src`/`ort-src` attributes). Without it an energy gate cuts the
 utterances. The mic is one session per page: it survives remounts, and a
 reload with the mic on resumes listening.
+
+## Hands-free voice
+
+```js
+const { voice } = await import("liagent/voice");
+const v = voice({ tts: "/api/tts" }); // tts: optional, only for the "cloud" output
+box.voice = v; // replies are read sentence by sentence
+mic.voice = v; // <liagent-mic>: talk over the agent to duck it, keep talking to cut in
+```
+
+`voice()` is one session per page. It reads with the device's most natural
+voice (or your TTS endpoint, `localStorage["liagent:voice-out"] = "cloud"`),
+at the box's speech rate. With the mic on, the browser's echo canceller and
+a text-level echo guard keep the agent from hearing itself. See
+[docs/embed.md](docs/embed.md#9-hands-free-voice).
 
 ## The hub
 

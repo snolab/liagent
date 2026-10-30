@@ -12,6 +12,7 @@ position, so it fits any page and any framework. This guide covers:
 6. [Reference](#6-reference): properties, callbacks, attributes, theming
 7. [Security notes](#7-security-notes)
 8. [Voice input](#8-voice-input): `<liagent-mic>`, your STT endpoint, Silero VAD
+9. [Hands-free voice](#9-hands-free-voice): replies read aloud, barge-in, your TTS endpoint
 
 ## 1. Loading it
 
@@ -748,3 +749,82 @@ listening". Either way it fires `mic-resume`.
 **Privacy.** Audio goes only to the endpoint you configure, one utterance at
 a time. Nothing is recorded while the mic is off. The button shows a red
 ring and REC while it captures.
+
+## 9. Hands-free voice
+
+`liagent/voice` (also in `liagent.js`) reads the agent's replies aloud and
+works with the mic, so a conversation needs no hands:
+
+```ts
+import { voice } from "liagent/voice";
+
+const v = voice({ tts: "/api/tts" }); // the page's one session; options may change later
+box.voice = v; // the box calls v.speak(text, id) for a live reply, v.stop(why) on typing or "off"
+mic.voice = v; // <liagent-mic>: ducking, barge-in, the echo guard
+```
+
+The object the box takes is `{ speak(text: string, id?: string): void; stop(why?: string): void }`
+(`VoiceHook`). `speak` reads a message once per `id`. `stop("typing")`,
+`stop("tap")` and `stop("speech")` pause where it is, and `v.resume()` (a
+send, or a blur) reads on. Any other `stop()` clears the queue.
+
+How it reads:
+
+- **A queue of sentences.** A reply is cut after `.`/`!`/`?` before a space
+  (so `3.14` stays whole), after `。．！？` with closing brackets, and at
+  newlines. A sentence over 200 characters is cut at a clause mark, else at
+  a space. A new reply waits behind the one being read and never cuts it off.
+- **The voice.** The language comes from the script (kana → ja-JP, Hangul
+  → ko-KR, other Han → zh-CN, else en-US). Among the installed voices it
+  prefers Premium, then Enhanced or Siri, then the regular named voice, and
+  never iOS's Eloquence or novelty voices (`voiceQuality`, `pickNaturalVoice`).
+- **The speed** is `localStorage["liagent:speech-rate"]` (1, 1.25, 1.5 or 2;
+  default 1.5). A change applies from the next sentence. Cloud audio keeps
+  its pitch.
+- **When.** With the mic on, every reply is read, whatever the read-aloud
+  toggle says. With the mic off, a reply is read only with the toggle on
+  (`liagent:speak`, the box's) and `here()` true (default: the tab is visible).
+- **Interruptions.** If the user talks over the agent, its volume ducks to
+  25%. If they keep talking for 1.5 s, and the VAD's mean speech probability
+  is at least 0.7, that is a barge-in: the reading pauses at the last word
+  boundary (or the clip's time) and reads on 1.5 s after they stop, or as
+  soon as their line is sent. A tap on the mic while the agent speaks does
+  the same at once.
+- **Echo.** By default the mic stays open while the agent speaks: echo
+  cancellation, noise suppression and auto gain are on, and a transcript
+  that matches a sentence spoken in the last 10 s is dropped (`echoScore`,
+  Dice over character n-grams). With `localStorage["liagent:voice-aec"] = "0"`,
+  capture is held while the agent speaks and for 400 ms after.
+
+### Cloud voices: your TTS endpoint (optional)
+
+By default replies are read by the device's `speechSynthesis`. With a TTS
+endpoint and `localStorage["liagent:voice-out"] = "cloud"` (or `mode: () => "cloud"`),
+each sentence is fetched and played through the page's own audio. The echo
+canceller then has it as a reference, which works better on phones, and the
+duck is a smooth gain ramp. liagent has no TTS backend. The request is:
+
+```
+GET <tts>?lang=<base language, e.g. ja>&text=<one sentence, URL-encoded>
+→ 200, audio/mpeg (or any audio the browser plays)
+```
+
+Pass a function to build another URL shape: `voice({ tts: (text, lang) => … })`.
+Set `ttsLimits: { langs: ["en", "ja"], maxText: 200 }` to say what it can
+voice. A sentence it cannot voice (another language, too long, a non-2xx
+answer, a refused `play()`) is read by `speechSynthesis` instead. Clips are
+cached (64), and the next sentence is fetched while one plays. The one
+`<audio>` element is unlocked in the mic's tap, as iOS needs.
+
+### Reference
+
+`voice(options)`: `tts`, `ttsLimits`, `mode`, `enabled`, `here`, `aec`,
+`rate`, `log` (debug events such as `voice-out`, `voice-duck`,
+`voice-barge-in`). A later `voice(options)` changes them. `createVoice(deps)`
+is the same session with every browser piece injected, for tests or another
+runtime.
+
+Session methods: `speak`, `stop`, `reply(text) → boolean`, `resume()`,
+`interrupt(why)`, `state()` (`{ mic, speaking, hold, ducked, queued, paused }`),
+`subscribe(f)`, `echoCheck(text, durationMs)`, and the mic's hooks
+(`setMic`, `userSpeech`, `userIdle`, `userFrame`, `echoDropped`, `unlock`).

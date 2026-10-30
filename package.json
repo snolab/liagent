@@ -59,6 +59,12 @@
       "import": "./dist/mic.js",
       "default": "./dist/mic.js"
     },
+    "./voice": {
+      "types": "./dist/voice.d.ts",
+      "browser": "./dist/voice.js",
+      "import": "./dist/voice.js",
+      "default": "./dist/voice.js"
+    },
     "./tree": {
       "types": "./dist/tree.d.ts",
       "browser": "./dist/tree.js",
