@@ -303,9 +303,17 @@ export class MicElement extends Base {
   set storageKey(v: string) {
     this.setAttribute("storage-key", v);
   }
-  /** Echo-cancelled barge-in (default on; the `aec="off"` attribute turns it off). */
+  /** Echo-cancelled barge-in (default: on unless localStorage `liagent:voice-aec` is "0"; `aec="off"` turns it off). */
   get aec(): boolean {
     const a = this.getAttribute("aec");
+    if (a === null) {
+      // Unset: the device setting the voice output reads too.
+      try {
+        return globalThis.localStorage?.getItem("liagent:voice-aec") !== "0";
+      } catch {
+        return true;
+      }
+    }
     return a !== "off" && a !== "false" && a !== "0";
   }
   set aec(v: boolean) {

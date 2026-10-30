@@ -1,5 +1,5 @@
 // The browser bundle (dist/liagent.js): the box, its hub client, the mic
-// button and the shared protocol in one standalone ES module with no dependencies.
+// button, the hands-free voice and the shared protocol in one standalone ES module with no dependencies.
 //
 //   const { defineChatBox, connectHub } = await import("https://…/liagent.js");
 //   defineChatBox();
@@ -42,3 +42,15 @@ export {
   postStt,
   vadFromScripts,
 } from "./mic-button.ts";
+export {
+  type OutMode,
+  type TtsSource,
+  type Voice,
+  type VoiceHook,
+  type VoiceOptions,
+  type VoiceState,
+  createVoice,
+  pickNaturalVoice,
+  voice,
+  voiceQuality,
+} from "./voice.ts";
