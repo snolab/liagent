@@ -41,14 +41,23 @@ box.push(message); // live: an agent's reply is read aloud
 const hub = connectHub(box, { url: "wss://example.com/api/chat" });
 ```
 
+The box is one glass bar, `[mark | tree | input … | mic]`: the mark minimizes
+it (tap), opens its menu (double tap) and moves it (drag); the tree button shows
+the state tree (`treeSource`) and drags sideways through its levels. Minimized,
+new lines float over the bar and the tree's frontier (✓ done, ▶ in progress,
+› next) sits under them.
+
 Properties: `messages`, `live`, `listeners`, `sessions`, `pending`, `evalRan`,
-`busy`, `guest`, `notice`, `warning`, `defaultOpen`, `placeholder`, and the
-avatars: `agentAvatar` (set it to your app's logo), `userAvatar`, `userName`,
-`userId`.
-Callbacks: `onSend(text, to?) → boolean`, `onAnswer(type, pair, scope?)`, `onEnd(pair)`,
+`busy`, `guest`, `notice`, `warning`, `defaultOpen`, `placeholder`,
+`treeSource`, `strings`, `voice`, `micActive`, and the avatars: `agentAvatar`
+(set it to your app's logo), `userAvatar`, `userName`, `userId`.
+Callbacks: `onSend(text, to?, { source? }) → boolean`, `onAnswer(type, pair, scope?)`, `onEnd(pair)`,
 `avatarFor(message)` (a per-sender avatar).
+Voice input plugs in as a child with `slot="mic"` (it lands at the bar's right
+end) and drives `draft`, `setDraft(text, { source: "stt" })`, `setPartial(text)`,
+`submit()` and `micActive`; see [docs/embed.md](docs/embed.md#voice-input-and-output).
 Attributes: `storage-key` (localStorage prefix, default `liagent`), `collapsed`,
-`placeholder`, `agent-avatar`, `user-avatar`, `user-name`. Theme: `--liagent-bg`
+`placeholder`, `agent-avatar`, `user-avatar`, `user-name`, `mic-active`. Theme: `--liagent-bg`
 (set it to your page colour), `--liagent-fg`, `--liagent-agent`, `--liagent-z`,
 `--liagent-width`, `--liagent-avatar`.
 
