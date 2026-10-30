@@ -28,6 +28,13 @@
 //     icon per eval session, and a pairing request as one compact line
 //     (code · what it asks for · Allow · ✕).
 //   - Sending: see src/input.ts (debounce, Enter, IME, Android, dictation).
+//   - Node paths: messages are addressed to state-tree nodes; a node's
+//     assignee (agent or human) receives them. A line from a node shows a
+//     muted subtitle under the avatar ("/words › prefetch", or "from → to"
+//     between agents, "→ node" on the user's own) and a left border by the
+//     node's hue. "@/words › prefetch " at the start of the input targets
+//     that node (typing "@/" offers `nodes`); the target is a removable chip.
+//     box.setTarget(path) sets it from outside (a state tree's selection).
 //   - Agent replies that arrive live are read aloud with speechSynthesis, in
 //     a language picked from their script; typing cancels it, the menu turns
 //     it off for the device, and iOS is unlocked on the first gesture.
@@ -45,6 +52,12 @@ import {
   MAX_CHAT,
   type PageInfo,
   type PairInfo,
+  ROOT_NODE,
+  completeNode,
+  lineNode,
+  nodePath,
+  parseAddress,
+  pathLabel,
   pickLang,
   pickVoice,
   trimHistory,
@@ -201,6 +214,15 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .log li { display: flex; align-items: flex-start; gap: 6px; }
 .log .text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding-top: 1px; }
 .log .hint { opacity: .6; display: block; }
+.log li.node { border-inline-start: 2px solid var(--node); padding-inline-start: 4px; }
+.log .sub { display: block; font-size: 10px; line-height: 1.2; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aim { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 0 0 4px 30px; pointer-events: none; }
+.aim > * { pointer-events: auto; }
+.target { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; border: 1px solid var(--node, color-mix(in oklch, currentColor 25%, transparent)); border-radius: 999px; padding: 0 6px; font-size: 10px; line-height: 16px; background: color-mix(in oklch, var(--liagent-bg, Canvas) 55%, transparent); }
+.target.preview { opacity: .7; }
+.target button { all: unset; cursor: pointer; line-height: 1; }
+.nodes { list-style: none; margin: 0; padding: 2px 0; max-width: 100%; border: 1px solid color-mix(in oklch, currentColor 25%, transparent); border-radius: 8px; font-size: 11px; background: color-mix(in oklch, var(--liagent-bg, Canvas) 55%, transparent); backdrop-filter: blur(6px); }
+.nodes button { all: unset; display: block; cursor: pointer; padding: 1px 8px; }
 /* Fixed size whatever loads, so a late picture shifts nothing. */
 .av {
   --s: var(--liagent-avatar, 18px);
@@ -247,8 +269,12 @@ textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent
 
 /** The chat box element. Plain properties in, callbacks out; see the file header. */
 export class ChatBox extends Base {
-  /** Called with each draft that goes out; return false if it could not be sent (the draft is kept). */
-  onSend?: (text: string) => boolean;
+  /**
+   * Called with each draft that goes out, and the state-tree node it is
+   * addressed to (absent = the main thread); return false if it could not
+   * be sent (the draft is kept).
+   */
+  onSend?: (text: string, to?: string) => boolean;
   /** The user answered a pairing request in the icon row. */
   onAnswer?: (type: AnswerType, p: PairInfo, answer: Answer) => void;
   /** End was pressed on a session in the menu. */
@@ -284,6 +310,10 @@ export class ChatBox extends Base {
   private _placeholder = "Message the agent…";
   private _agentAvatar: AvatarSrc | Element | null = null;
   private _user: Sender = {};
+  /** The nodes agents listen at: "@/…" completions. */
+  private _nodes: string[] = [];
+  /** The node the next line goes to ("/" = the main thread, no chip). */
+  private _target = ROOT_NODE;
 
   private root?: ShadowRoot;
   private open = true;
@@ -338,6 +368,21 @@ export class ChatBox extends Base {
   }
   get live() {
     return this._live;
+  }
+  /** The state-tree nodes agents listen at (the hub's `state.nodes`): "@/…" completions. */
+  set nodes(v: string[]) {
+    this._nodes = Array.isArray(v) ? v.filter((n) => typeof n === "string") : [];
+    this.renderAim();
+  }
+  /** The node the next line goes to ("/" = the main thread). */
+  get target() {
+    return this._target;
+  }
+  /** Address the next lines to a state-tree node ("/" = back to the main thread). */
+  setTarget(path: string) {
+    this._target = nodePath(path) ?? ROOT_NODE;
+    this.renderAim();
+    this.renderPlaceholder();
   }
   /** Agents listening now (shown in the status). */
   set listeners(v: number) {
@@ -437,8 +482,7 @@ export class ChatBox extends Base {
   }
   set placeholder(v: string) {
     this._placeholder = v;
-    const ta = this.els.input as HTMLTextAreaElement | undefined;
-    if (ta) ta.placeholder = v;
+    this.renderPlaceholder();
   }
 
   // ---- storage --------------------------------------------------------------
@@ -541,6 +585,7 @@ export class ChatBox extends Base {
   <div class="icons" id="icons" aria-label="Agent connections"></div>
   <ol class="log" id="log"></ol>
   <div class="warn" id="warn" role="alert" hidden></div>
+  <div class="aim" id="aim" hidden></div>
   <p class="notice" id="notice" role="status" hidden></p>
   <div class="row" id="row">
     <button type="button" class="grip" id="grip" aria-label="Drag the chat box; double tap for its menu" aria-expanded="false">⠿<span class="dot" id="dot"></span></button>
@@ -556,6 +601,7 @@ export class ChatBox extends Base {
       "icons",
       "log",
       "warn",
+      "aim",
       "notice",
       "row",
       "grip",
@@ -590,6 +636,7 @@ export class ChatBox extends Base {
       cancelSpeech();
       this.arm();
       this.renderStatus();
+      this.renderAim();
     });
     ta.addEventListener("compositionstart", () => {
       this.composing = true;
@@ -609,11 +656,22 @@ export class ChatBox extends Base {
         })
       ) {
         e.preventDefault();
+        const first = this.completions()[0];
+        if (first) return this.pick(first);
         this.submit();
       }
     });
     ta.addEventListener("keydown", (e) => {
       this.shiftEnter = e.key === "Enter" && e.shiftKey;
+      // "@/wo" + Tab (or Enter): the first completion becomes the target.
+      const first = this.completions()[0];
+      if ((e.key === "Tab" || e.key === "Enter") && !e.shiftKey && first) {
+        e.preventDefault();
+        return this.pick(first);
+      }
+      // Backspace in an empty input drops the target chip.
+      if (e.key === "Backspace" && !this.draft && this._target !== ROOT_NODE)
+        return this.setTarget(ROOT_NODE);
       if (!enterSends(e, this.composing)) return;
       e.preventDefault();
       this.submit();
@@ -715,6 +773,8 @@ export class ChatBox extends Base {
   }
   private arm() {
     this.disarm();
+    // An "@/node" still being typed never goes out by the debounce.
+    if (parseAddress(this.draft)?.complete === false) return;
     const next = afterChange(this.draft, this.settledLen, this.composing);
     if (!this.composing) this.settledLen = this.draft.length;
     if (next === "send") return this.submit();
@@ -729,17 +789,96 @@ export class ChatBox extends Base {
   /** Send the draft now. Kept (and the status says so) if it could not go out. */
   submit() {
     this.disarm();
-    const text = this.draft.trim();
+    let text = this.draft.trim();
+    // A leading "@/words › prefetch " addresses that node, and keeps it as the target.
+    const addr = parseAddress(text);
+    if (addr) {
+      if (!addr.complete) return;
+      this.setTarget(addr.to);
+      text = addr.text;
+      if (!text) return this.clearDraft();
+    }
     if (!text) return;
-    if (!this.onSend?.(text)) {
+    const to = this._target === ROOT_NODE ? undefined : this._target;
+    if (!this.onSend?.(text, to)) {
       this.offline = true;
       return this.renderStatus();
     }
     this.offline = false;
+    this.clearDraft();
+  }
+  private clearDraft() {
     this.draft = "";
     this.settledLen = 0;
     (this.els.input as HTMLTextAreaElement).value = "";
     this.renderStatus();
+    this.renderAim();
+  }
+
+  /** The draft's "@/…" while it is typed: the listening nodes under it. */
+  private completions(): string[] {
+    const a = /^@\/\S*(?:\s*›\s*\S*)*$/.test(this.draft) ? parseAddress(this.draft) : null;
+    return a && !a.complete ? completeNode(this.draft, this._nodes) : [];
+  }
+  private pick(n: string) {
+    this.setTarget(n);
+    this.clearDraft();
+    (this.els.input as HTMLTextAreaElement).focus();
+  }
+  private renderPlaceholder() {
+    const ta = this.els.input as HTMLTextAreaElement | undefined;
+    if (ta)
+      ta.placeholder =
+        this._target === ROOT_NODE ? this._placeholder : `Message ${pathLabel(this._target)}…`;
+  }
+  /** The target chip (× back to the main thread) and the "@/…" completions. */
+  private renderAim() {
+    const aim = this.els.aim;
+    if (!aim) return;
+    aim.replaceChildren();
+    const list = this.completions();
+    // A typed "@/node " previews its target; a half-typed one keeps the chip's.
+    const typed = parseAddress(this.draft)?.complete ? parseAddress(this.draft) : null;
+    const shown = typed ? typed.to : this._target;
+    if (list.length) {
+      const ul = document.createElement("ul");
+      ul.className = "nodes";
+      ul.setAttribute("role", "listbox");
+      ul.setAttribute("aria-label", "Nodes to address");
+      for (const n of list) {
+        const li = document.createElement("li");
+        li.setAttribute("role", "option");
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = pathLabel(n);
+        b.addEventListener("pointerdown", (e) => e.preventDefault());
+        b.addEventListener("click", () => this.pick(n));
+        li.append(b);
+        ul.append(li);
+      }
+      aim.append(ul);
+    }
+    if (shown !== ROOT_NODE) {
+      const chip = document.createElement("span");
+      chip.className = typed ? "target preview" : "target";
+      chip.dataset.node = shown;
+      const border = lineNode({ from: "owner", to: shown })?.border;
+      if (border) chip.style.setProperty("--node", border);
+      const label = document.createElement("span");
+      label.textContent = `→ ${pathLabel(shown)}`;
+      chip.append(label);
+      if (!typed) {
+        const x = document.createElement("button");
+        x.type = "button";
+        x.textContent = "×";
+        x.setAttribute("aria-label", "Send to the main thread instead");
+        x.addEventListener("pointerdown", (e) => e.preventDefault());
+        x.addEventListener("click", () => this.setTarget(ROOT_NODE));
+        chip.append(x);
+      }
+      aim.append(chip);
+    }
+    aim.hidden = !aim.childElementCount;
   }
 
   // ---- render ---------------------------------------------------------------
@@ -773,6 +912,8 @@ export class ChatBox extends Base {
     this.renderIcons();
     this.renderLog();
     this.renderInput();
+    this.renderAim();
+    this.renderPlaceholder();
     this.renderStatus();
     this.renderMenu();
   }
@@ -938,7 +1079,6 @@ export class ChatBox extends Base {
     // the time only on hover (long press on a phone).
     for (const m of this._messages) {
       const li = document.createElement("li");
-      li.title = when(m.at);
       li.dataset.from = m.from;
       const who = lineAvatar(m, {
         friend: this._friend,
@@ -946,12 +1086,25 @@ export class ChatBox extends Base {
         agentAvatar: this._agentAvatar,
         avatarFor: this.avatarFor,
       });
+      // The state-tree node a line belongs to: a muted subtitle and a left border by its hue.
+      const node = lineNode(m);
+      li.title = node ? `${when(m.at)} · ${who.name} · ${node.subtitle}` : when(m.at);
       const text = document.createElement("span");
       text.className = "text";
-      // Screen readers hear the name once, here; the avatar is hidden from them.
+      if (node) {
+        li.classList.add("node");
+        li.dataset.node = node.node;
+        li.style.setProperty("--node", node.border);
+        const sub = document.createElement("span");
+        sub.className = "sub";
+        sub.setAttribute("aria-hidden", "true");
+        sub.textContent = node.subtitle;
+        text.append(sub);
+      }
+      // Screen readers hear the name (and node) once, here; the avatar is hidden from them.
       const sr = document.createElement("span");
       sr.className = "sr";
-      sr.textContent = `${who.name}: `;
+      sr.textContent = node ? `${who.name} (${node.subtitle}): ` : `${who.name}: `;
       text.append(sr, document.createTextNode(m.text));
       li.append(avatarEl(who.srcs, who.node, who.name, initialOf(who.initialFrom), who.seed), text);
       log.append(li);

@@ -154,6 +154,31 @@ returns `{ok, value | error}`, and the output is JSON. Rules for eval:
 
 On a hub without eval, the request is refused at once.
 
+## Node paths: sub-agents in the same chat
+
+Messages are addressed to state-tree nodes; a node's assignee (an agent or a
+human) receives them. A node path is route-like (`/words/prefetch`), shown as
+`/words › prefetch`. The root `/` is the main thread. A sub-agent posts in
+the same box, and each of its lines shows its node under the avatar, so the
+user can tell which task spoke.
+
+- **Set your node once:** `export LIAGENT_TASK_PATH=/words/prefetch
+  LIAGENT_AGENT=prefetcher`, or pass `--task-path` / `--agent` on each command.
+- **Listen at your node:** `liagent listen` then hears the lines addressed
+  to your node. It also hears the lines for nodes below yours, marked
+  `"observed": true`. A listener with no node is the main one: it observes
+  everything.
+- **Reply:** `say "…"` speaks from your node, without addressing anyone.
+  `say --to /words "…"` addresses a node; going upward to a parent or the
+  root is always allowed, and so is going into your own subtree.
+- **Reach another branch:** this needs a grant from an agent whose node
+  holds both ends. The main agent's always counts:
+  `liagent grant --from /words/prefetch --to /words/audio`. Without one,
+  the hub answers `out of scope: needs a grant from /words`.
+- **The user addresses you** by typing `@/words › prefetch …` in the box, or
+  by picking your node. Treat an observed line as context: the node it was
+  addressed to answers it.
+
 ## Friends' threads
 
 Friends are other signed-in people on the site. Each has their own thread,
