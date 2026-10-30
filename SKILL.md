@@ -307,9 +307,12 @@ rules:
 
 A project can keep a hand-edited markdown outline of its work (for example
 `docs/state-tree.md`). The box shows it read-only: set `box.treeSource` and the
-menu gets **Tree**, which swaps the log for the outline (`<liagent-state-tree>`,
-`liagent/tree`). `frontierLines(parseTreeDoc(md))` gives three lines for a
-small space: ✓ the most recently done, ▶ in progress, › next.
+bar's tree button shows it above the log as chips (the top-level nodes in a
+row, one branch open below; a sideways drag on the button opens or folds the
+focused node a level per 40px). Minimized, the bar shows its frontier: ✓ the
+most recently done, ▶ in progress (with who is on it), › next. The full
+outline is `<liagent-state-tree>` (`liagent/tree`), and
+`frontierLines(parseTreeDoc(md))` gives the three lines for any small space.
 
 ```
 ## Heading                 a top-level node
@@ -328,8 +331,8 @@ small space: ✓ the most recently done, ▶ in progress, › next.
 
 `box.treeSource` is a URL (fetched as markdown), a function returning markdown
 or nodes, or a feed `{ subscribe(onUpdate) → unsubscribe }` that pushes each
-version (a dev server's file watch, a progress socket). It is loaded when the
-tree opens and again each time the menu opens; nothing polls.
+version (a dev server's file watch, a progress socket). It is loaded when it is
+set and again each time the tree opens; nothing polls.
 
 Agents editing the tree:
 
