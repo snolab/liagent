@@ -1,6 +1,6 @@
 {
   "name": "liagent",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "User ⇄ agent chat for any web page: a floating chat box (a framework-free custom element), its hub (a Cloudflare Durable Object), and the agent's CLI",
   "keywords": [
     "agent",
