@@ -25,7 +25,7 @@ jobs:
         run: |
           bun pm pack --dry-run --ignore-scripts > /tmp/pack.txt 2>&1
           cat /tmp/pack.txt
-          for f in index.js index.d.ts box.js mic.js mic.d.ts client.js protocol.js hub.js hub.d.ts cli.js liagent.js; do
+          for f in index.js index.d.ts box.js mic.js mic.d.ts voice.js voice.d.ts client.js protocol.js hub.js hub.d.ts cli.js liagent.js; do
             grep -q "dist/$f" /tmp/pack.txt || { echo "missing from the package: dist/$f" >&2; exit 1; }
           done
           if grep -E " (src|test|examples|demo|scripts)/|\.map$" /tmp/pack.txt; then

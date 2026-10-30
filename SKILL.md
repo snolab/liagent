@@ -401,6 +401,9 @@ set the `vad-src`/`ort-src` attributes. Otherwise an energy gate is used.
 Lines dictated this way arrive with `source: "stt"` once the box passes it
 through, so you can tell them from typed lines. Details are in
 docs/embed.md, "Voice input".
+For hands-free replies, set `box.voice = mic.voice = voice()` (from
+`liagent/voice`). An optional `tts` endpoint (`GET ?lang=&text=` → audio)
+enables cloud voices. Without one, the device's voice is used.
 
 ### 3. Host the hub yourself
 
