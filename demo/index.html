@@ -33,14 +33,18 @@
     <main>
       <h1>liagent</h1>
       <p>
-        The chat box sits at the bottom right. The "agent" here is fake: it echoes what you send
-        after a second, with the spinner up while it "works".
+        The chat bar sits at the bottom right. The "agent" here is fake: it echoes what you send
+        after a second, with the spinner up while it "works". Tap the mark to minimize it (new lines
+        then float over the bar, with the state tree's frontier below them); double tap it for the
+        menu; tap the tree button for the state tree, or drag it sideways to open and fold the
+        focused node.
       </p>
       <p>
         <button id="ask">Simulate a pairing request</button>
         <button id="eval">Simulate an eval session</button>
         <button id="ran">Simulate "code ran"</button>
         <button id="live">Toggle connected</button>
+        <button id="dictate">Simulate dictation</button>
       </p>
       <p>
         Lorem ipsum dolor sit amet — the page under the log stays clickable:
@@ -55,7 +59,7 @@
       const now = Date.now();
       if (location.search.includes("hub")) {
         const { connectHub } = await import("./liagent.js");
-        for (const id of ["ask", "eval", "ran", "live"])
+        for (const id of ["ask", "eval", "ran", "live", "dictate"])
           document.getElementById(id).disabled = true;
         const as = new URLSearchParams(location.search).get("as");
         connectHub(box, {
@@ -142,6 +146,39 @@
           setTimeout(() => (box.evalRan = false), 4000);
         };
         document.getElementById("live").onclick = () => (box.live = !box.live);
+        // A stand-in for a voice input: the box side of the mic contract
+        // (micActive, setPartial, setDraft with source "stt", submit).
+        document.getElementById("dictate").onclick = () => {
+          const words = ["Dictated", "text", "lands", "in", "the", "draft."];
+          box.micActive = true;
+          let i = 0;
+          const step = () => {
+            if (i < words.length) {
+              box.setPartial(words.slice(0, ++i).join(" "));
+              return setTimeout(step, 250);
+            }
+            box.setPartial(null);
+            box.setDraft(words.join(" "), { source: "stt" });
+            box.micActive = false;
+          };
+          step();
+        };
+        box.treeSource = () => `# Demo
+≈en done: Shipped · doing: Two at once · next: Up next
+## Chat bar
+- [x] One bar: mark, tree, input, mic (done 2026-10-30T09:00)
+- [~] Tree chips and detents @demo-agent#a1b2c3
+  - [x] Reducer
+  - [~] Chips
+    - [ ] Blink in progress
+- [~] Floating lines
+- [ ] Docs
+## Voice
+- [ ] A slotted mic (!)
+- [ ] Voice out
+## Done
+- [x] Polished lines
+`;
       }
     </script>
   </body>

@@ -1,7 +1,7 @@
 # Embedding the chat box
 
 `<liagent-chat>` is a custom element with no dependencies: one ES module,
-about 25 kB minified. It renders into its own shadow root at a fixed
+about 95 kB minified (31 kB gzipped). It renders into its own shadow root at a fixed
 position, so it fits any page and any framework. This guide covers:
 
 1. [Loading it](#1-loading-it)
@@ -327,27 +327,33 @@ effect.
 
 **Properties** (set them; each re-renders only its own part of the box):
 
-| Property      | Type                            | Meaning                                                                                                                                                                                                                                             |
-| ------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `messages`    | `ChatMessage[]`                 | The log (the last 200). Replacing it never reads aloud.                                                                                                                                                                                             |
-| `live`        | `boolean`                       | Connected: the green dot, and the status text.                                                                                                                                                                                                      |
-| `listeners`   | `number`                        | Agents listening, in the status.                                                                                                                                                                                                                    |
-| `sessions`    | `PairInfo[]`                    | Approved agents: an icon each for eval, and a line with End in the menu.                                                                                                                                                                            |
-| `pending`     | `PairInfo \| null`              | A pairing request: its code, what it asks for (`chat · 30d` or `code · 8h`), Allow and ✕, plus page checkboxes for code (eval) when several pages are open; chat always covers every page. An older agent that names no scope gets `8h · chat · ✕`. |
-| `pages`       | `PageInfo[]`                    | The user's open pages (the hub's `state.pages`).                                                                                                                                                                                                    |
-| `self`        | `string`                        | Which of them this page is (`state.self`).                                                                                                                                                                                                          |
-| `evalRan`     | `boolean`                       | Code just ran here: the eval icons pulse.                                                                                                                                                                                                           |
-| `busy`        | `boolean`                       | The spinner, set by hand (`beat()` is the timed way).                                                                                                                                                                                               |
-| `friend`      | `boolean`                       | A friend's page, not the user's: no chat grant offered, sessions say "preview".                                                                                                                                                                     |
-| `notice`      | `string`                        | Replaces the input (say, "Chat is not available").                                                                                                                                                                                                  |
-| `warning`     | `string`                        | One line above the input (say, a rate limit).                                                                                                                                                                                                       |
-| `defaultOpen` | `boolean`                       | Open or collapsed on first visit. Set it before attaching.                                                                                                                                                                                          |
-| `placeholder` | `string`                        | The input's placeholder.                                                                                                                                                                                                                            |
-| `agentAvatar` | `string \| string[] \| Element` | The agent's avatar: your app's logo. URLs are tried in order; an element is cloned onto each line. Unset: the agent name's initial.                                                                                                                 |
-| `userAvatar`  | `string \| string[]`            | The user's picture on their own lines, URLs in fallback order (your app's avatar, then the provider's `user.image`).                                                                                                                                |
-| `userName`    | `string`                        | The user's name: the initial of their fallback avatar.                                                                                                                                                                                              |
-| `userId`      | `string`                        | A stable id, or its hash (never an email): the fallback avatar's colour.                                                                                                                                                                            |
-| `nodes`       | `string[]`                      | The state-tree nodes agents listen at (the hub's `state.nodes`): what typing `@/` offers.                                                                                                                                                           |
+| Property      | Type                            | Meaning                                                                                                                                                                                                                                                 |
+| ------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `messages`    | `ChatMessage[]`                 | The log (the last 200). Replacing it never reads aloud.                                                                                                                                                                                                 |
+| `live`        | `boolean`                       | Connected: the green dot, and the status text.                                                                                                                                                                                                          |
+| `listeners`   | `number`                        | Agents listening, in the status.                                                                                                                                                                                                                        |
+| `sessions`    | `PairInfo[]`                    | Approved agents: an icon each for eval, and a line with End in the menu.                                                                                                                                                                                |
+| `pending`     | `PairInfo \| null`              | A pairing request: its code, what it asks for (`chat · 30d` or `code · 8h`), Allow and ✕, plus page checkboxes for code (eval) when several pages are open; chat always covers every page. An older agent that names no scope gets `8h · chat · ✕`.     |
+| `pages`       | `PageInfo[]`                    | The user's open pages (the hub's `state.pages`).                                                                                                                                                                                                        |
+| `self`        | `string`                        | Which of them this page is (`state.self`).                                                                                                                                                                                                              |
+| `evalRan`     | `boolean`                       | Code just ran here: the eval icons pulse.                                                                                                                                                                                                               |
+| `busy`        | `boolean`                       | The spinner, set by hand (`beat()` is the timed way).                                                                                                                                                                                                   |
+| `friend`      | `boolean`                       | A friend's page, not the user's: no chat grant offered, sessions say "preview".                                                                                                                                                                         |
+| `notice`      | `string`                        | Replaces the input (say, "Chat is not available").                                                                                                                                                                                                      |
+| `warning`     | `string`                        | One line above the input (say, a rate limit).                                                                                                                                                                                                           |
+| `defaultOpen` | `boolean`                       | Open or collapsed on first visit. Set it before attaching.                                                                                                                                                                                              |
+| `placeholder` | `string`                        | The input's placeholder.                                                                                                                                                                                                                                |
+| `agentAvatar` | `string \| string[] \| Element` | The agent's avatar: your app's logo. URLs are tried in order; an element is cloned onto each line. Unset: the agent name's initial.                                                                                                                     |
+| `userAvatar`  | `string \| string[]`            | The user's picture on their own lines, URLs in fallback order (your app's avatar, then the provider's `user.image`).                                                                                                                                    |
+| `userName`    | `string`                        | The user's name: the initial of their fallback avatar.                                                                                                                                                                                                  |
+| `userId`      | `string`                        | A stable id, or its hash (never an email): the fallback avatar's colour.                                                                                                                                                                                |
+| `nodes`       | `string[]`                      | The state-tree nodes agents listen at (the hub's `state.nodes`): what typing `@/` offers.                                                                                                                                                               |
+| `treeSource`  | `TreeSource`                    | The state tree: a URL serving its markdown, a function returning markdown or nodes, or a feed `{ subscribe(onUpdate) }`. The tree button shows it; minimized, its frontier sits under the floating lines. Loaded when set and each time the tree opens. |
+| `treeRepo`    | `string`                        | `owner/repo` that a bare `#123` in the tree links to.                                                                                                                                                                                                   |
+| `treeStrings` | `Partial<TreeStrings>`          | The tree's strings (English; Chinese on a `zh` page).                                                                                                                                                                                                   |
+| `strings`     | `Partial<UiStrings>`            | The box's own strings (English; Chinese on a `zh` page, under yours).                                                                                                                                                                                   |
+| `micActive`   | `boolean`                       | A mic is on: treated as focus (the log opens, the box is opaque), and the debounce never sends by itself. Attribute: `mic-active`.                                                                                                                      |
+| `voice`       | `ChatVoice`                     | `{ speak(text, id?), stop(why?) }`: reads replies aloud instead of `speechSynthesis`. See [Voice input and output](#voice-input-and-output).                                                                                                            |
 
 **Methods:**
 
@@ -356,8 +362,15 @@ effect.
 - `beat()`: one busy beat. The spinner shows for 12 s unless another beat
   renews it or a reply ends it, and a beat within 1.5 s after a reply is
   ignored.
-- `speak(text)`: reads text aloud if the device has read-aloud on.
-- `submit()`: sends the draft now.
+- `speak(text, id?)`: reads text aloud if the device has read-aloud on (or a
+  mic is on), through `voice` if set, at `speechRate`.
+- `submit() → boolean`: sends the draft now, as Enter would; true if it went
+  out.
+- `draft`, `setDraft(text, { source? })`, `setPartial(text | null)`: the draft,
+  for a voice input (below).
+- `speechRate`: the read-aloud speed picked in the menu (1, 1.25, 1.5 or 2;
+  per device, default 1.5).
+- `setTree(open)`: shows or hides the state tree.
 - `setTarget(path)`: addresses the next lines to a state-tree node
   (`"/"` = back to the main thread), shown as a removable chip; `target`
   reads it. Meant for a state tree's selection. Typing `@/words › prefetch `
@@ -365,8 +378,10 @@ effect.
 
 **Callbacks:**
 
-- `onSend(text, to?) → boolean`: `to` is the state-tree node the line is
-  addressed to (absent = the main thread).
+- `onSend(text, to?, { source? }) → boolean`: `to` is the state-tree node the
+  line is addressed to (absent = the main thread); `source` is `"stt"` when
+  the line is dictation sent unchanged (`connectHub` passes it on, so the
+  agent may polish it).
 - `onAnswer("allow" | "deny", pair, { pages?, scope? })`: `pages` holds the
   ticked page ids, or `"all"`. `scope` is `"chat"` only when an older agent's
   prompt was answered with the 30-day chat button.
@@ -395,25 +410,82 @@ name from a visually hidden span instead.
 - `placeholder`
 - `agent-avatar`, `user-avatar`, `user-name`: the same as the properties
   (read once, when attached).
+- `mic-active`: the same as `micActive` (watched).
 
 **Theming** (CSS custom properties on the element):
 
-| Variable           | Default                    | Used for                                                                               |
-| ------------------ | -------------------------- | -------------------------------------------------------------------------------------- |
-| `--liagent-bg`     | `Canvas`                   | The halo behind the text, and the translucent input (55%). Set it to your page colour. |
-| `--liagent-fg`     | `CanvasText`               | Text                                                                                   |
-| `--liagent-agent`  | `oklch(0.55 0.14 150)`     | The spinner                                                                            |
-| `--liagent-avatar` | `18px`                     | Avatar size                                                                            |
-| `--liagent-z`      | `40`                       | z-index                                                                                |
-| `--liagent-width`  | `min(20rem, 100vw - 1rem)` | Box width                                                                              |
+| Variable           | Default                    | Used for                                                                       |
+| ------------------ | -------------------------- | ------------------------------------------------------------------------------ |
+| `--liagent-bg`     | `Canvas`                   | The halo behind the text, and the glass bar (55%). Set it to your page colour. |
+| `--liagent-fg`     | `CanvasText`               | Text                                                                           |
+| `--liagent-agent`  | `oklch(0.55 0.14 150)`     | The spinner                                                                    |
+| `--liagent-avatar` | `18px`                     | Avatar size                                                                    |
+| `--liagent-z`      | `40`                       | z-index                                                                        |
+| `--liagent-width`  | `min(20rem, 100vw - 1rem)` | Box width                                                                      |
 
-**Behaviour:** the header of [`src/box.ts`](../src/box.ts) covers it. When a
-draft is sent is in [`src/input.ts`](../src/input.ts):
+**Layout:** one glass bar, `[mark | tree | input … | mic]`.
+
+- **Mark** (its dot: green with an agent listening, amber connected without
+  one, grey offline): a tap minimizes or restores, a double tap opens the menu
+  (status, read-aloud and its speed, the tree, minimize, sessions, pages), a
+  drag moves the box (remembered per device). Minimized, the bar shrinks to
+  `[mark | tree | mic]` (180 ms, at once under reduced motion) and the input
+  is inert.
+- **Tree button:** a tap shows or hides the state tree; a sideways drag moves
+  the focused node through 40px detents (right opens a level, left folds one;
+  it resists at the ends and commits on release); arrow keys move in it,
+  Escape closes it. It carries the eval sessions' count. One panel at a time:
+  the menu or the tree.
+- **Expanded:** one scroller, the tree on top, the whole history below it,
+  newest at the bottom. Three lines at rest; 30vh while the input has focus,
+  a mic is on, or the tree is open.
+- **Minimized:** new lines float over the bar for twice their reading time
+  (at least 2.5 s), then fade over 10 s; hover or touch holds them, and the
+  latest floats again on each minimize. The tree's frontier sits under them.
+  Both hang on the bar's side of the screen, inside the safe areas. A badge
+  counts the agent's unread lines.
+
+The header of [`src/box.ts`](../src/box.ts) has the details. When a draft is
+sent is in [`src/input.ts`](../src/input.ts):
 
 - 3 s after typing stops;
 - on Enter, but not Shift+Enter, and never during IME composition;
 - on Android, on the line break itself;
 - at once, when dictation inserts more than 10 characters that end a sentence.
+
+### Voice input and output
+
+The box has no microphone of its own: a voice input is a separate element
+(say `<liagent-mic>`) placed as a child of the box with `slot="mic"`. It
+lands in a named shadow slot at the bar's right end, after the input; with
+nothing slotted that cell collapses. It stays in the bar when minimized, so
+hands-free voice goes on.
+
+```html
+<liagent-chat storage-key="myapp:chat">
+  <liagent-mic slot="mic"></liagent-mic>
+</liagent-chat>
+```
+
+What the mic uses on the box (`box` is its parent element):
+
+| Member                                  | Meaning                                                                                                                                                      |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `box.micActive = true` / `mic-active`   | The mic is on: treated as focus (the log opens to 30vh, the box is opaque), every reply is read aloud, and the debounce never sends by itself.               |
+| `box.setPartial(text \| null)`          | A live transcript, shown dimmed after the draft; never committed. `null` clears it. While one shows, the debounce waits.                                     |
+| `box.draft`                             | The draft as it is now (what the user typed, or earlier dictation).                                                                                          |
+| `box.setDraft(text, { source: "stt" })` | Sets the draft (the whole input) as dictation. Sent unchanged, the line goes out with `source: "stt"`; anything typed into it first makes it the user's own. |
+| `box.submit() → boolean`                | Sends the draft as Enter would; true if it went out.                                                                                                         |
+
+So a final transcript is usually `box.setDraft(joined(box.draft, text), { source: "stt" })`,
+then `box.submit()` when it ends a sentence.
+
+For voice output, set `box.voice = { speak(text, id?), stop(why?) }`. The box
+then calls `voice.speak(reply.text, reply.id)` for each reply that arrives
+live (when read-aloud is on, or a mic is on) instead of using
+`speechSynthesis`, and `voice.stop("typing")` when the user types (`"off"`
+when read-aloud is turned off). `box.speechRate` is the menu's speed for it to
+apply.
 
 ## 7. Security notes
 

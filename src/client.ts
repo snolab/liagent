@@ -237,8 +237,14 @@ export function connectHub(box: ChatBox, opts: HubOptions): HubConnection {
     else if (ws) idle = setTimeout(disconnect, IDLE_MS);
   };
 
-  box.onSend = (text, to) =>
-    send(ws, { type: "chat", id: crypto.randomUUID().slice(0, 12), text, ...(to ? { to } : {}) });
+  box.onSend = (text, to, opts) =>
+    send(ws, {
+      type: "chat",
+      id: crypto.randomUUID().slice(0, 12),
+      text,
+      ...(to ? { to } : {}),
+      ...(opts?.source ? { source: opts.source } : {}),
+    });
   box.onAnswer = (type, p, answer) =>
     void send(
       ws,
