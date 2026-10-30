@@ -41,12 +41,15 @@ const hub = connectHub(box, { url: "wss://example.com/api/chat" });
 ```
 
 Properties: `messages`, `live`, `listeners`, `sessions`, `pending`, `evalRan`,
-`busy`, `guest`, `notice`, `warning`, `defaultOpen`, `placeholder`.
-Callbacks: `onSend(text) → boolean`, `onAnswer(type, pair, scope?)`, `onEnd(pair)`.
+`busy`, `guest`, `notice`, `warning`, `defaultOpen`, `placeholder`, and the
+avatars: `agentAvatar` (set it to your app's logo), `userAvatar`, `userName`,
+`userId`.
+Callbacks: `onSend(text, to?) → boolean`, `onAnswer(type, pair, scope?)`, `onEnd(pair)`,
+`avatarFor(message)` (a per-sender avatar).
 Attributes: `storage-key` (localStorage prefix, default `liagent`), `collapsed`,
-`placeholder`. Theme: `--liagent-bg` (set it to your page colour),
-`--liagent-fg`, `--liagent-you`, `--liagent-agent`, `--liagent-z`,
-`--liagent-width`.
+`placeholder`, `agent-avatar`, `user-avatar`, `user-name`. Theme: `--liagent-bg`
+(set it to your page colour), `--liagent-fg`, `--liagent-agent`, `--liagent-z`,
+`--liagent-width`, `--liagent-avatar`.
 
 [docs/embed.md](docs/embed.md) shows how to embed it: plain HTML, your own
 transport, React, Vue, Svelte, Angular, Solid and Preact (each with a runnable
@@ -89,7 +92,13 @@ liagent listen --to <agent>  # messages → JSON lines, and into an agent-yes ag
 liagent say "On it."         # reply in the box
 liagent busy --every 4 &     # the box's spinner, until your next reply
 liagent eval 'document.title'  # eval hubs only; the user allows it on chosen pages
+LIAGENT_TASK_PATH=/words/prefetch liagent say "warming"  # a sub-agent, shown as "/words › prefetch"
 ```
+
+Messages are addressed to state-tree nodes; a node's assignee (agent or
+human) receives them. Sub-agents share the box, each line tagged with its
+node, and the user can type `@/node …` to address one. See "Node paths" in
+[SKILL.md](SKILL.md).
 
 [SKILL.md](SKILL.md) is the agent skill: how an AI agent should pair,
 listen, reply, and behave in the chat.

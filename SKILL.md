@@ -154,6 +154,31 @@ returns `{ok, value | error}`, and the output is JSON. Rules for eval:
 
 On a hub without eval, the request is refused at once.
 
+## Node paths: sub-agents in the same chat
+
+Messages are addressed to state-tree nodes; a node's assignee (an agent or a
+human) receives them. A node path is route-like (`/words/prefetch`), shown as
+`/words › prefetch`. The root `/` is the main thread. A sub-agent posts in
+the same box, and each of its lines shows its node under the avatar, so the
+user can tell which task spoke.
+
+- **Set your node once:** `export LIAGENT_TASK_PATH=/words/prefetch
+  LIAGENT_AGENT=prefetcher`, or pass `--task-path` / `--agent` on each command.
+- **Listen at your node:** `liagent listen` then hears the lines addressed
+  to your node. It also hears the lines for nodes below yours, marked
+  `"observed": true`. A listener with no node is the main one: it observes
+  everything.
+- **Reply:** `say "…"` speaks from your node, without addressing anyone.
+  `say --to /words "…"` addresses a node; going upward to a parent or the
+  root is always allowed, and so is going into your own subtree.
+- **Reach another branch:** this needs a grant from an agent whose node
+  holds both ends. The main agent's always counts:
+  `liagent grant --from /words/prefetch --to /words/audio`. Without one,
+  the hub answers `out of scope: needs a grant from /words`.
+- **The user addresses you** by typing `@/words › prefetch …` in the box, or
+  by picking your node. Treat an observed line as context: the node it was
+  addressed to answers it.
+
 ## Friends' threads
 
 Friends are other signed-in people on the site. Each has their own thread,
@@ -330,8 +355,24 @@ const { defineChatBox, connectHub } = await import("liagent"); // or "agent-yes/
 defineChatBox();
 const box = document.body.appendChild(document.createElement("liagent-chat"));
 box.style.setProperty("--liagent-bg", "var(--background)"); // your page colour
+box.agentAvatar = "/logo.svg"; // your app's logo, on the agent's lines
+box.userAvatar = [user.avatarUrl, user.image]; // the signed-in user's picture(s)
+box.userName = user.name; // their fallback initial
+box.userId = user.id; // their fallback colour (an id or its hash, never an email)
 connectHub(box, { url: "/api/chat", wanted: () => userIsOwner });
 ```
+
+**Avatars.** Each log line starts with a small round avatar instead of a
+name. Set `agentAvatar` to your app's logo: a URL, or an element (cloned
+onto each line); the `agent-avatar` attribute works too. Set `userAvatar`
+to the signed-in user's picture: a URL, or URLs in fallback order (your
+app's own avatar, then the sign-in provider's image, such as better-auth or
+next-auth `user.image`). For other people's lines (friends, in the owner's
+view), set `avatarFor = (m) => ({ name, avatar, id })`, or have your hub put
+a `sender` on each message. A picture that fails to load falls through to
+the next. After the last one, the box shows the name's initial on
+`oklch(0.7 0.12 <hue>)`, with the hue taken from the id and the letter at
+4.5:1 contrast or better. The name stays readable to screen readers.
 
 Framework notes (details and a runnable page for each in docs/embed.md):
 

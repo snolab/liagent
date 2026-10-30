@@ -327,22 +327,27 @@ effect.
 
 **Properties** (set them; each re-renders only its own part of the box):
 
-| Property      | Type               | Meaning                                                                                                                                                                                                                                             |
-| ------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `messages`    | `ChatMessage[]`    | The log (the last 200). Replacing it never reads aloud.                                                                                                                                                                                             |
-| `live`        | `boolean`          | Connected: the green dot, and the status text.                                                                                                                                                                                                      |
-| `listeners`   | `number`           | Agents listening, in the status.                                                                                                                                                                                                                    |
-| `sessions`    | `PairInfo[]`       | Approved agents: an icon each for eval, and a line with End in the menu.                                                                                                                                                                            |
-| `pending`     | `PairInfo \| null` | A pairing request: its code, what it asks for (`chat · 30d` or `code · 8h`), Allow and ✕, plus page checkboxes for code (eval) when several pages are open; chat always covers every page. An older agent that names no scope gets `8h · chat · ✕`. |
-| `pages`       | `PageInfo[]`       | The user's open pages (the hub's `state.pages`).                                                                                                                                                                                                    |
-| `self`        | `string`           | Which of them this page is (`state.self`).                                                                                                                                                                                                          |
-| `evalRan`     | `boolean`          | Code just ran here: the eval icons pulse.                                                                                                                                                                                                           |
-| `busy`        | `boolean`          | The spinner, set by hand (`beat()` is the timed way).                                                                                                                                                                                               |
-| `friend`      | `boolean`          | A friend's page, not the user's: no chat grant offered, sessions say "preview".                                                                                                                                                                     |
-| `notice`      | `string`           | Replaces the input (say, "Chat is not available").                                                                                                                                                                                                  |
-| `warning`     | `string`           | One line above the input (say, a rate limit).                                                                                                                                                                                                       |
-| `defaultOpen` | `boolean`          | Open or collapsed on first visit. Set it before attaching.                                                                                                                                                                                          |
-| `placeholder` | `string`           | The input's placeholder.                                                                                                                                                                                                                            |
+| Property      | Type                            | Meaning                                                                                                                                                                                                                                             |
+| ------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `messages`    | `ChatMessage[]`                 | The log (the last 200). Replacing it never reads aloud.                                                                                                                                                                                             |
+| `live`        | `boolean`                       | Connected: the green dot, and the status text.                                                                                                                                                                                                      |
+| `listeners`   | `number`                        | Agents listening, in the status.                                                                                                                                                                                                                    |
+| `sessions`    | `PairInfo[]`                    | Approved agents: an icon each for eval, and a line with End in the menu.                                                                                                                                                                            |
+| `pending`     | `PairInfo \| null`              | A pairing request: its code, what it asks for (`chat · 30d` or `code · 8h`), Allow and ✕, plus page checkboxes for code (eval) when several pages are open; chat always covers every page. An older agent that names no scope gets `8h · chat · ✕`. |
+| `pages`       | `PageInfo[]`                    | The user's open pages (the hub's `state.pages`).                                                                                                                                                                                                    |
+| `self`        | `string`                        | Which of them this page is (`state.self`).                                                                                                                                                                                                          |
+| `evalRan`     | `boolean`                       | Code just ran here: the eval icons pulse.                                                                                                                                                                                                           |
+| `busy`        | `boolean`                       | The spinner, set by hand (`beat()` is the timed way).                                                                                                                                                                                               |
+| `friend`      | `boolean`                       | A friend's page, not the user's: no chat grant offered, sessions say "preview".                                                                                                                                                                     |
+| `notice`      | `string`                        | Replaces the input (say, "Chat is not available").                                                                                                                                                                                                  |
+| `warning`     | `string`                        | One line above the input (say, a rate limit).                                                                                                                                                                                                       |
+| `defaultOpen` | `boolean`                       | Open or collapsed on first visit. Set it before attaching.                                                                                                                                                                                          |
+| `placeholder` | `string`                        | The input's placeholder.                                                                                                                                                                                                                            |
+| `agentAvatar` | `string \| string[] \| Element` | The agent's avatar: your app's logo. URLs are tried in order; an element is cloned onto each line. Unset: the agent name's initial.                                                                                                                 |
+| `userAvatar`  | `string \| string[]`            | The user's picture on their own lines, URLs in fallback order (your app's avatar, then the provider's `user.image`).                                                                                                                                |
+| `userName`    | `string`                        | The user's name: the initial of their fallback avatar.                                                                                                                                                                                              |
+| `userId`      | `string`                        | A stable id, or its hash (never an email): the fallback avatar's colour.                                                                                                                                                                            |
+| `nodes`       | `string[]`                      | The state-tree nodes agents listen at (the hub's `state.nodes`): what typing `@/` offers.                                                                                                                                                           |
 
 **Methods:**
 
@@ -353,33 +358,54 @@ effect.
   ignored.
 - `speak(text)`: reads text aloud if the device has read-aloud on.
 - `submit()`: sends the draft now.
+- `setTarget(path)`: addresses the next lines to a state-tree node
+  (`"/"` = back to the main thread), shown as a removable chip; `target`
+  reads it. Meant for a state tree's selection. Typing `@/words › prefetch `
+  at the start of the input does the same.
 
 **Callbacks:**
 
-- `onSend(text) → boolean`
+- `onSend(text, to?) → boolean`: `to` is the state-tree node the line is
+  addressed to (absent = the main thread).
 - `onAnswer("allow" | "deny", pair, { pages?, scope? })`: `pages` holds the
   ticked page ids, or `"all"`. `scope` is `"chat"` only when an older agent's
   prompt was answered with the 30-day chat button.
 - `onEnd(pair)`: End on an agent's session in the menu.
 - `onEndPage(id)`: End on one of the user's pages in the menu. Ending this
   page takes a second tap.
+- `avatarFor(message) → { id?, name?, avatar? } | null`: the avatar for a
+  line that is not the agent's. Its pictures are tried first, then the
+  line's own `sender` (a hub may set one on each message), then, on the
+  user's own lines, `userAvatar`.
+
+**Avatars:** every line starts with an avatar (18px; `--liagent-avatar`).
+Pictures load with `referrerPolicy="no-referrer"` (Google's need it) and
+`loading="lazy"`, at a fixed size. One that fails to load falls through to
+the next, then to the element, then to the name's initial on
+`oklch(0.7 0.12 <hue>)`. The hue comes from a hash of the id, or of the
+thread if there is no id, and the letter is near-black or white, whichever
+contrasts more (at least 4.5:1). The avatar has `alt` / `aria-label` and a
+`title` set to the name, and is hidden from screen readers, which read the
+name from a visually hidden span instead.
 
 **Attributes:**
 
 - `storage-key`: the localStorage prefix. Default `liagent`.
 - `collapsed`: the same as `defaultOpen = false`.
 - `placeholder`
+- `agent-avatar`, `user-avatar`, `user-name`: the same as the properties
+  (read once, when attached).
 
 **Theming** (CSS custom properties on the element):
 
-| Variable          | Default                    | Used for                                                                               |
-| ----------------- | -------------------------- | -------------------------------------------------------------------------------------- |
-| `--liagent-bg`    | `Canvas`                   | The halo behind the text, and the translucent input (55%). Set it to your page colour. |
-| `--liagent-fg`    | `CanvasText`               | Text                                                                                   |
-| `--liagent-you`   | `oklch(0.55 0.13 250)`     | "you:"                                                                                 |
-| `--liagent-agent` | `oklch(0.55 0.14 150)`     | The agent's name, and the spinner                                                      |
-| `--liagent-z`     | `40`                       | z-index                                                                                |
-| `--liagent-width` | `min(20rem, 100vw - 1rem)` | Box width                                                                              |
+| Variable           | Default                    | Used for                                                                               |
+| ------------------ | -------------------------- | -------------------------------------------------------------------------------------- |
+| `--liagent-bg`     | `Canvas`                   | The halo behind the text, and the translucent input (55%). Set it to your page colour. |
+| `--liagent-fg`     | `CanvasText`               | Text                                                                                   |
+| `--liagent-agent`  | `oklch(0.55 0.14 150)`     | The spinner                                                                            |
+| `--liagent-avatar` | `18px`                     | Avatar size                                                                            |
+| `--liagent-z`      | `40`                       | z-index                                                                                |
+| `--liagent-width`  | `min(20rem, 100vw - 1rem)` | Box width                                                                              |
 
 **Behaviour:** the header of [`src/box.ts`](../src/box.ts) covers it. When a
 draft is sent is in [`src/input.ts`](../src/input.ts):

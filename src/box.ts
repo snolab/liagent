@@ -14,15 +14,27 @@
 //   - No title bar. A grip (⠿) on the one-line input drags the box anywhere,
 //     kept on screen and remembered; a double tap on it opens a menu with the
 //     status, read-aloud, minimize, and each session with an End button.
-//   - The log is game-style text over the page, one "name: text" line per
-//     message, the time on hover; it is click-through, so the page under it
-//     still takes taps. A vertical swipe on the input scrolls it.
+//   - The log is game-style text over the page, one line per message: a
+//     small round avatar, then the text, the time on hover; it is
+//     click-through, so the page under it still takes taps. A vertical swipe
+//     on the input scrolls it. Avatars: `agentAvatar` (your app's logo) on
+//     the agent's lines, `userAvatar` on the user's own, `avatarFor(m)` or
+//     the line's `sender` on anyone else's; a picture that fails to load
+//     falls through to the next, then to the name's initial on an oklch
+//     circle (src/avatar.ts). The name stays for screen readers.
 //   - The input and grip are translucent (about 55% of the page colour); the
 //     whole box is faint until touched or focused.
 //   - A row of icons at the top: a spinner while the agent is working, one
 //     icon per eval session, and a pairing request as one compact line
 //     (code · what it asks for · Allow · ✕).
 //   - Sending: see src/input.ts (debounce, Enter, IME, Android, dictation).
+//   - Node paths: messages are addressed to state-tree nodes; a node's
+//     assignee (agent or human) receives them. A line from a node shows a
+//     muted subtitle under the avatar ("/words › prefetch", or "from → to"
+//     between agents, "→ node" on the user's own) and a left border by the
+//     node's hue. "@/words › prefetch " at the start of the input targets
+//     that node (typing "@/" offers `nodes`); the target is a removable chip.
+//     box.setTarget(path) sets it from outside (a state tree's selection).
 //   - Agent replies that arrive live are read aloud with speechSynthesis, in
 //     a language picked from their script; typing cancels it, the menu turns
 //     it off for the device, and iOS is unlocked on the first gesture.
@@ -30,8 +42,8 @@
 //
 // Theming: set CSS custom properties on the element — --liagent-bg (the page
 // colour, for the halo and the translucent input; default Canvas),
-// --liagent-fg, --liagent-you, --liagent-agent, --liagent-z (z-index, 40),
-// --liagent-width (min(20rem, 100vw - 1rem)).
+// --liagent-fg, --liagent-agent (the spinner), --liagent-z (z-index, 40),
+// --liagent-width (min(20rem, 100vw - 1rem)), --liagent-avatar (18px).
 
 import {
   BUSY_AFTER_REPLY_MS,
@@ -40,6 +52,12 @@ import {
   MAX_CHAT,
   type PageInfo,
   type PairInfo,
+  ROOT_NODE,
+  completeNode,
+  lineNode,
+  nodePath,
+  parseAddress,
+  pathLabel,
   pickLang,
   pickVoice,
   trimHistory,
@@ -51,6 +69,17 @@ import {
   type TreeStrings,
   defineStateTree,
 } from "./tree.ts";
+import { type AvatarSrc, type Sender, avatarColors, initialOf, lineAvatar } from "./avatar.ts";
+
+export {
+  type AvatarSrc,
+  type Sender,
+  avatarColors,
+  avatarSrcs,
+  hashId,
+  initialOf,
+  lineAvatar,
+} from "./avatar.ts";
 
 export type AnswerType = "allow" | "deny";
 /**
@@ -188,11 +217,28 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   overflow-y: auto; display: flex; flex-direction: column; gap: 2px; scrollbar-width: none;
 }
 .log::-webkit-scrollbar { display: none; }
-.log li { white-space: pre-wrap; overflow-wrap: anywhere; }
-.log .who { font-weight: 500; margin-inline-end: 4px; }
-.log .you { color: var(--liagent-you, oklch(0.55 0.13 250)); }
-.log .agent { color: var(--liagent-agent, oklch(0.55 0.14 150)); }
-.log .hint { opacity: .6; }
+.log li { display: flex; align-items: flex-start; gap: 6px; }
+.log .text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding-top: 1px; }
+.log .hint { opacity: .6; display: block; }
+.log li.node { border-inline-start: 2px solid var(--node); padding-inline-start: 4px; }
+.log .sub { display: block; font-size: 10px; line-height: 1.2; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aim { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 0 0 4px 30px; pointer-events: none; }
+.aim > * { pointer-events: auto; }
+.target { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; border: 1px solid var(--node, color-mix(in oklch, currentColor 25%, transparent)); border-radius: 999px; padding: 0 6px; font-size: 10px; line-height: 16px; background: color-mix(in oklch, var(--liagent-bg, Canvas) 55%, transparent); }
+.target.preview { opacity: .7; }
+.target button { all: unset; cursor: pointer; line-height: 1; }
+.nodes { list-style: none; margin: 0; padding: 2px 0; max-width: 100%; border: 1px solid color-mix(in oklch, currentColor 25%, transparent); border-radius: 8px; font-size: 11px; background: color-mix(in oklch, var(--liagent-bg, Canvas) 55%, transparent); backdrop-filter: blur(6px); }
+.nodes button { all: unset; display: block; cursor: pointer; padding: 1px 8px; }
+/* Fixed size whatever loads, so a late picture shifts nothing. */
+.av {
+  --s: var(--liagent-avatar, 18px);
+  flex: none; width: var(--s); height: var(--s); border-radius: 50%; overflow: hidden;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: calc(var(--s) * 0.55); line-height: 1; text-shadow: none; user-select: none;
+}
+img.av { display: block; object-fit: cover; }
+.av > * { max-width: 100%; max-height: 100%; }
+.sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .warn { padding: 4px 8px 0; font-size: 10px; color: oklch(0.6 0.17 45); }
 .notice { pointer-events: auto; margin: 0; padding: 8px; opacity: .8; }
 .row { position: relative; display: flex; align-items: stretch; gap: 4px; }
@@ -229,14 +275,24 @@ textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent
 
 /** The chat box element. Plain properties in, callbacks out; see the file header. */
 export class ChatBox extends Base {
-  /** Called with each draft that goes out; return false if it could not be sent (the draft is kept). */
-  onSend?: (text: string) => boolean;
+  /**
+   * Called with each draft that goes out, and the state-tree node it is
+   * addressed to (absent = the main thread); return false if it could not
+   * be sent (the draft is kept).
+   */
+  onSend?: (text: string, to?: string) => boolean;
   /** The user answered a pairing request in the icon row. */
   onAnswer?: (type: AnswerType, p: PairInfo, answer: Answer) => void;
   /** End was pressed on a session in the menu. */
   onEnd?: (s: PairInfo) => void;
   /** End was pressed (and, for this page, confirmed) on one of the user's pages in the menu. */
   onEndPage?: (id: string) => void;
+  /**
+   * The host's avatar for a line that is not the agent's: its pictures are
+   * tried first, its name and id fill in. Return nothing to use the line's
+   * `sender` (and, on the user's own lines, `userAvatar`).
+   */
+  avatarFor?: (m: ChatMessage) => Sender | null | undefined;
 
   private _messages: ChatMessage[] = [];
   private _live = false;
@@ -264,6 +320,12 @@ export class ChatBox extends Base {
   treeRepo?: string;
   /** The tree's strings (English defaults). */
   treeStrings: Partial<TreeStrings> = {};
+  private _agentAvatar: AvatarSrc | Element | null = null;
+  private _user: Sender = {};
+  /** The nodes agents listen at: "@/…" completions. */
+  private _nodes: string[] = [];
+  /** The node the next line goes to ("/" = the main thread, no chip). */
+  private _target = ROOT_NODE;
 
   private root?: ShadowRoot;
   private open = true;
@@ -318,6 +380,21 @@ export class ChatBox extends Base {
   }
   get live() {
     return this._live;
+  }
+  /** The state-tree nodes agents listen at (the hub's `state.nodes`): "@/…" completions. */
+  set nodes(v: string[]) {
+    this._nodes = Array.isArray(v) ? v.filter((n) => typeof n === "string") : [];
+    this.renderAim();
+  }
+  /** The node the next line goes to ("/" = the main thread). */
+  get target() {
+    return this._target;
+  }
+  /** Address the next lines to a state-tree node ("/" = back to the main thread). */
+  setTarget(path: string) {
+    this._target = nodePath(path) ?? ROOT_NODE;
+    this.renderAim();
+    this.renderPlaceholder();
   }
   /** Agents listening now (shown in the status). */
   set listeners(v: number) {
@@ -417,10 +494,44 @@ export class ChatBox extends Base {
     }
     this.renderMenu();
   }
+  /**
+   * The agent's avatar: your app's logo, as a URL (or URLs in fallback
+   * order) or an element (cloned onto each line). Attribute: agent-avatar.
+   * Unset: the agent name's initial.
+   */
+  set agentAvatar(v: AvatarSrc | Element | null | undefined) {
+    if (same(this._agentAvatar, v ?? null)) return;
+    this._agentAvatar = v ?? null;
+    this.renderLog();
+  }
+  get agentAvatar() {
+    return this._agentAvatar;
+  }
+  /**
+   * The user's picture on their own lines: a URL, or URLs in fallback order
+   * (the app's own avatar, then the sign-in provider's image). Attribute:
+   * user-avatar.
+   */
+  set userAvatar(v: AvatarSrc | null | undefined) {
+    this.setUser("avatar", v ?? undefined);
+  }
+  /** The user's name: their fallback avatar's initial. Attribute: user-name. */
+  set userName(v: string | null | undefined) {
+    this.setUser("name", v ?? undefined);
+  }
+  /** A stable id (or a hash of one, never an email): the user's fallback colour. */
+  set userId(v: string | null | undefined) {
+    this.setUser("id", v ?? undefined);
+  }
+  /** Re-render the log only when the value changed (wrappers set props on every render). */
+  private setUser<K extends keyof Sender>(k: K, v: Sender[K]) {
+    if (same(this._user[k], v)) return;
+    this._user = { ...this._user, [k]: v };
+    this.renderLog();
+  }
   set placeholder(v: string) {
     this._placeholder = v;
-    const ta = this.els.input as HTMLTextAreaElement | undefined;
-    if (ta) ta.placeholder = v;
+    this.renderPlaceholder();
   }
 
   // ---- storage --------------------------------------------------------------
@@ -469,6 +580,12 @@ export class ChatBox extends Base {
     if (this.hasAttribute("collapsed")) this._defaultOpen = false;
     const ph = this.getAttribute("placeholder");
     if (ph) this._placeholder = ph;
+    const agentAv = this.getAttribute("agent-avatar");
+    if (agentAv && !this._agentAvatar) this._agentAvatar = agentAv;
+    const userAv = this.getAttribute("user-avatar");
+    if (userAv && !this._user.avatar) this._user.avatar = userAv;
+    const userName = this.getAttribute("user-name");
+    if (userName && !this._user.name) this._user.name = userName;
     const o = this.read("open");
     this.open = o === null ? this._defaultOpen : o === "1";
     try {
@@ -517,6 +634,7 @@ export class ChatBox extends Base {
   <div class="icons" id="icons" aria-label="Agent connections"></div>
   <ol class="log" id="log"></ol>
   <div class="warn" id="warn" role="alert" hidden></div>
+  <div class="aim" id="aim" hidden></div>
   <p class="notice" id="notice" role="status" hidden></p>
   <div class="row" id="row">
     <button type="button" class="grip" id="grip" aria-label="Drag the chat box; double tap for its menu" aria-expanded="false">⠿<span class="dot" id="dot"></span></button>
@@ -532,6 +650,7 @@ export class ChatBox extends Base {
       "icons",
       "log",
       "warn",
+      "aim",
       "notice",
       "row",
       "grip",
@@ -566,6 +685,7 @@ export class ChatBox extends Base {
       cancelSpeech();
       this.arm();
       this.renderStatus();
+      this.renderAim();
     });
     ta.addEventListener("compositionstart", () => {
       this.composing = true;
@@ -585,11 +705,22 @@ export class ChatBox extends Base {
         })
       ) {
         e.preventDefault();
+        const first = this.completions()[0];
+        if (first) return this.pick(first);
         this.submit();
       }
     });
     ta.addEventListener("keydown", (e) => {
       this.shiftEnter = e.key === "Enter" && e.shiftKey;
+      // "@/wo" + Tab (or Enter): the first completion becomes the target.
+      const first = this.completions()[0];
+      if ((e.key === "Tab" || e.key === "Enter") && !e.shiftKey && first) {
+        e.preventDefault();
+        return this.pick(first);
+      }
+      // Backspace in an empty input drops the target chip.
+      if (e.key === "Backspace" && !this.draft && this._target !== ROOT_NODE)
+        return this.setTarget(ROOT_NODE);
       if (!enterSends(e, this.composing)) return;
       e.preventDefault();
       this.submit();
@@ -691,6 +822,8 @@ export class ChatBox extends Base {
   }
   private arm() {
     this.disarm();
+    // An "@/node" still being typed never goes out by the debounce.
+    if (parseAddress(this.draft)?.complete === false) return;
     const next = afterChange(this.draft, this.settledLen, this.composing);
     if (!this.composing) this.settledLen = this.draft.length;
     if (next === "send") return this.submit();
@@ -705,17 +838,96 @@ export class ChatBox extends Base {
   /** Send the draft now. Kept (and the status says so) if it could not go out. */
   submit() {
     this.disarm();
-    const text = this.draft.trim();
+    let text = this.draft.trim();
+    // A leading "@/words › prefetch " addresses that node, and keeps it as the target.
+    const addr = parseAddress(text);
+    if (addr) {
+      if (!addr.complete) return;
+      this.setTarget(addr.to);
+      text = addr.text;
+      if (!text) return this.clearDraft();
+    }
     if (!text) return;
-    if (!this.onSend?.(text)) {
+    const to = this._target === ROOT_NODE ? undefined : this._target;
+    if (!this.onSend?.(text, to)) {
       this.offline = true;
       return this.renderStatus();
     }
     this.offline = false;
+    this.clearDraft();
+  }
+  private clearDraft() {
     this.draft = "";
     this.settledLen = 0;
     (this.els.input as HTMLTextAreaElement).value = "";
     this.renderStatus();
+    this.renderAim();
+  }
+
+  /** The draft's "@/…" while it is typed: the listening nodes under it. */
+  private completions(): string[] {
+    const a = /^@\/\S*(?:\s*›\s*\S*)*$/.test(this.draft) ? parseAddress(this.draft) : null;
+    return a && !a.complete ? completeNode(this.draft, this._nodes) : [];
+  }
+  private pick(n: string) {
+    this.setTarget(n);
+    this.clearDraft();
+    (this.els.input as HTMLTextAreaElement).focus();
+  }
+  private renderPlaceholder() {
+    const ta = this.els.input as HTMLTextAreaElement | undefined;
+    if (ta)
+      ta.placeholder =
+        this._target === ROOT_NODE ? this._placeholder : `Message ${pathLabel(this._target)}…`;
+  }
+  /** The target chip (× back to the main thread) and the "@/…" completions. */
+  private renderAim() {
+    const aim = this.els.aim;
+    if (!aim) return;
+    aim.replaceChildren();
+    const list = this.completions();
+    // A typed "@/node " previews its target; a half-typed one keeps the chip's.
+    const typed = parseAddress(this.draft)?.complete ? parseAddress(this.draft) : null;
+    const shown = typed ? typed.to : this._target;
+    if (list.length) {
+      const ul = document.createElement("ul");
+      ul.className = "nodes";
+      ul.setAttribute("role", "listbox");
+      ul.setAttribute("aria-label", "Nodes to address");
+      for (const n of list) {
+        const li = document.createElement("li");
+        li.setAttribute("role", "option");
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = pathLabel(n);
+        b.addEventListener("pointerdown", (e) => e.preventDefault());
+        b.addEventListener("click", () => this.pick(n));
+        li.append(b);
+        ul.append(li);
+      }
+      aim.append(ul);
+    }
+    if (shown !== ROOT_NODE) {
+      const chip = document.createElement("span");
+      chip.className = typed ? "target preview" : "target";
+      chip.dataset.node = shown;
+      const border = lineNode({ from: "owner", to: shown })?.border;
+      if (border) chip.style.setProperty("--node", border);
+      const label = document.createElement("span");
+      label.textContent = `→ ${pathLabel(shown)}`;
+      chip.append(label);
+      if (!typed) {
+        const x = document.createElement("button");
+        x.type = "button";
+        x.textContent = "×";
+        x.setAttribute("aria-label", "Send to the main thread instead");
+        x.addEventListener("pointerdown", (e) => e.preventDefault());
+        x.addEventListener("click", () => this.setTarget(ROOT_NODE));
+        chip.append(x);
+      }
+      aim.append(chip);
+    }
+    aim.hidden = !aim.childElementCount;
   }
 
   // ---- render ---------------------------------------------------------------
@@ -751,6 +963,8 @@ export class ChatBox extends Base {
     this.renderIcons();
     this.renderLog();
     this.renderInput();
+    this.renderAim();
+    this.renderPlaceholder();
     this.renderStatus();
     this.renderMenu();
   }
@@ -912,16 +1126,38 @@ export class ChatBox extends Base {
       li.textContent = `Type here; it is sent ${DEBOUNCE_MS / 1000} s after you stop.`;
       log.append(li);
     }
-    // A game-style log: one line per message, "name: text", no bubbles; the
-    // time only on hover (long press on a phone).
+    // A game-style log: one line per message, avatar then text, no bubbles;
+    // the time only on hover (long press on a phone).
     for (const m of this._messages) {
       const li = document.createElement("li");
-      li.title = when(m.at);
-      const who = document.createElement("span");
-      const agent = m.from === "agent";
-      who.className = `who ${agent ? "agent" : "you"}`;
-      who.textContent = `${agent ? m.label || "agent" : "you"}:`;
-      li.append(who, document.createTextNode(m.text));
+      li.dataset.from = m.from;
+      const who = lineAvatar(m, {
+        friend: this._friend,
+        user: this._user,
+        agentAvatar: this._agentAvatar,
+        avatarFor: this.avatarFor,
+      });
+      // The state-tree node a line belongs to: a muted subtitle and a left border by its hue.
+      const node = lineNode(m);
+      li.title = node ? `${when(m.at)} · ${who.name} · ${node.subtitle}` : when(m.at);
+      const text = document.createElement("span");
+      text.className = "text";
+      if (node) {
+        li.classList.add("node");
+        li.dataset.node = node.node;
+        li.style.setProperty("--node", node.border);
+        const sub = document.createElement("span");
+        sub.className = "sub";
+        sub.setAttribute("aria-hidden", "true");
+        sub.textContent = node.subtitle;
+        text.append(sub);
+      }
+      // Screen readers hear the name (and node) once, here; the avatar is hidden from them.
+      const sr = document.createElement("span");
+      sr.className = "sr";
+      sr.textContent = node ? `${who.name} (${node.subtitle}): ` : `${who.name}: `;
+      text.append(sr, document.createTextNode(m.text));
+      li.append(avatarEl(who.srcs, who.node, who.name, initialOf(who.initialFrom), who.seed), text);
       log.append(li);
     }
     if (this.open) log.scrollTop = log.scrollHeight;
@@ -1031,6 +1267,61 @@ export class ChatBox extends Base {
 }
 
 /** Register the element (once) under `tag`. Returns the class. */
+/** The same avatar value: one reference, or lists with the same URLs. */
+function same(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  return (
+    Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i])
+  );
+}
+
+/**
+ * One avatar: each picture in turn (no referrer, which Google's need; lazy),
+ * then the element, then the initial on an oklch circle. Labelled with the
+ * name (alt / aria-label) and titled with it, and aria-hidden: the line's
+ * screen-reader text already says who.
+ */
+function avatarEl(
+  srcs: string[],
+  node: Element | undefined,
+  name: string,
+  letter: string,
+  seed: string,
+  failed = 0,
+): HTMLElement {
+  let el: HTMLElement;
+  if (failed < srcs.length) {
+    const img = document.createElement("img");
+    img.alt = name;
+    img.referrerPolicy = "no-referrer";
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.draggable = false;
+    img.addEventListener(
+      "error",
+      () => img.replaceWith(avatarEl(srcs, node, name, letter, seed, failed + 1)),
+      { once: true },
+    );
+    img.src = srcs[failed]!;
+    el = img;
+  } else {
+    el = document.createElement("span");
+    el.setAttribute("role", "img");
+    el.setAttribute("aria-label", name);
+    if (node) el.append(node.cloneNode(true));
+    else {
+      const { bg, fg } = avatarColors(seed);
+      el.style.background = bg;
+      el.style.color = fg;
+      el.textContent = letter;
+    }
+  }
+  el.className = "av";
+  el.title = name;
+  el.setAttribute("aria-hidden", "true");
+  return el;
+}
+
 export function defineChatBox(tag = "liagent-chat"): typeof ChatBox {
   if (typeof customElements !== "undefined" && !customElements.get(tag))
     customElements.define(tag, ChatBox);

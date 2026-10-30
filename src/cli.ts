@@ -25,6 +25,27 @@ const USAGE = `liagent — the agent's side of the user ⇄ agent chat (src/hub.
   liagent say    [hub] "text" | -   [--to <email|user id>]
       Reply in the box (the user's thread, or a friend's), then exit.
 
+  liagent say    [hub] "text" --to /words/audio
+      Address a state-tree node instead (a --to starting with "/"): its
+      agent gets it, its ancestors observe it. Allowed into your own
+      subtree and upward; anything else needs a grant (below), else
+      {type:"error", reason:"out of scope: needs a grant from /words"}.
+
+  liagent grant   [hub] --from /words/prefetch --to /words/audio [--hours 8]
+  liagent ungrant [hub] --from /words/prefetch --to /words/audio
+      Let senders within one node address another (or take it back): only
+      from an agent whose node holds both — the main one ("/") always may.
+
+  --task-path /words/prefetch   (or $LIAGENT_TASK_PATH)
+  --agent <name>                (or $LIAGENT_AGENT)
+      Where this agent sits in the state tree. Messages are addressed to
+      state-tree nodes; a node's assignee (agent or human) receives them.
+      listen hears the lines addressed to that node (and, marked
+      "observed": true, to the nodes below it) instead of the main thread;
+      say lines carry it as taskPath and the name as agentId, which the box
+      shows under the avatar as "/words › prefetch". A sub-agent sets the
+      env vars once.
+
   liagent busy   [hub] [--to <email|user id>] [--every <seconds>]
       One heartbeat: the box shows a spinner for 12 s, or until you reply.
       With --every (e.g. 4, run it in the background), it keeps beating
@@ -54,6 +75,7 @@ import { dirname, join } from "node:path";
 import { deliveryText } from "./deliver.ts";
 import { type Scope, grantStore, privateAppend, spillTo } from "./grants.ts";
 import { PENDING_MS, type ChatMessage } from "./protocol.ts";
+import { type Place, listenLine, placeOf } from "./place.ts";
 
 type Msg = Record<string, unknown> & { type?: string };
 
@@ -79,6 +101,12 @@ const flag = (name: string) => {
 };
 const labelFlag = flag("--label");
 const label = labelFlag ?? `agent on ${hostname()}`;
+const placed = placeOf({ taskPath: flag("--task-path"), agent: flag("--agent") }, process.env);
+if ("error" in placed) {
+  console.error(`liagent: ${placed.error}`);
+  process.exit(2);
+}
+const place: Place = placed;
 
 /** The hub: the first argument if it is a URL, else $LIAGENT_HUB. */
 function takeHub(): string {
@@ -110,6 +138,9 @@ function controlUrl(hub: string, extra: Record<string, string> = {}) {
   const l = extra.token ? (labelFlag ?? "") : label;
   if (l) u.searchParams.set("label", l);
   for (const [k, v] of Object.entries(extra)) if (k !== "token") u.searchParams.set(k, v);
+  // The state-tree node this agent listens and speaks at.
+  if (place.node) u.searchParams.set("node", place.node);
+  if (place.agent) u.searchParams.set("agent", place.agent);
   return u.toString();
 }
 
@@ -266,7 +297,7 @@ function request(ws: WebSocket, msg: unknown, type: string, ms = RESULT_MS): Pro
       } else if (m.type === "error" || m.type === "revoked" || m.type === "expired") {
         clearTimeout(give);
         ws.removeEventListener("message", on);
-        reject(new Error(String(m.error ?? m.type)));
+        reject(new Error(String(m.reason ?? m.error ?? m.type)));
       }
     };
     ws.addEventListener("message", on);
@@ -367,8 +398,9 @@ async function cmdListen(hub: string) {
         const m = JSON.parse(String(e.data)) as Msg;
         if (m.type === "chat") {
           const c = m.message as ChatMessage & { email?: string };
-          if (c.from === "agent") return;
-          const line = JSON.stringify({ type: "chat", ...c });
+          const shown = listenLine(c, place, m.observed === true);
+          if (!shown) return;
+          const line = JSON.stringify(shown);
           console.log(line);
           if (out) privateAppend(out, `${line}\n`);
           if (to) {
@@ -422,8 +454,33 @@ async function main() {
     const text = await readText();
     if (!text) usage(2);
     const ws = await connectOrExit(hub);
-    const r = await request(ws, to ? { type: "say", text, to } : { type: "say", text }, "said");
+    const r = await request(
+      ws,
+      {
+        type: "say",
+        text,
+        ...(to ? { to } : {}),
+        ...(place.node ? { taskPath: place.node } : {}),
+        ...(place.agent ? { agentId: place.agent } : {}),
+      },
+      "said",
+    );
     console.error(`said ${r.id}`);
+    ws.close();
+    return;
+  }
+  if (cmd === "grant" || cmd === "ungrant") {
+    const from = flag("--from");
+    const to = flag("--to");
+    const hours = Number(flag("--hours") ?? 0);
+    if (!from || !to) usage(2);
+    const ws = await connectOrExit(hub);
+    const r = await request(
+      ws,
+      { type: cmd, from, to, ...(hours > 0 ? { ms: Math.round(hours * 3_600_000) } : {}) },
+      cmd === "grant" ? "granted" : "ungranted",
+    );
+    console.log(JSON.stringify(r));
     ws.close();
     return;
   }

@@ -154,6 +154,7 @@ function setup() {
     (p.last("state") as { pending: { pair: string } | null }).pending?.pair ?? "";
   return {
     hub,
+    sockets,
     page,
     controller,
     resume,
@@ -287,7 +288,17 @@ describe("ChatHub pairing", () => {
 });
 
 type Chat = {
-  message: { id: string; from: string; label: string; text: string; at: number; thread?: string };
+  message: {
+    id: string;
+    from: string;
+    label: string;
+    text: string;
+    at: number;
+    thread?: string;
+    taskPath?: string;
+    agentId?: string;
+    to?: string;
+  };
 };
 const chats = (ws: FakeSocket) =>
   ws.sent.filter((m) => m.type === "chat").map((m) => (m as unknown as Chat).message);
@@ -1469,5 +1480,86 @@ describe("ChatHub pairing limits survive hibernation", () => {
     const third = wake();
     await loading;
     expect(third.knock("203.0.113.9").last("pending")).toBeTruthy();
+  });
+});
+
+describe("ChatHub node paths (messages addressed to state-tree nodes)", () => {
+  /** The owner's page, the main (root) agent, and agents at the given nodes (?node=&agent=). */
+  async function tree(...nodes: string[]) {
+    const s = setup();
+    const p = s.page();
+    const root = s.controller("main lane", "chat");
+    await s.msg(p, { type: "allow", pair: s.pairOf(p) });
+    const token = root.last("approved")?.token as string;
+    const at: Record<string, FakeSocket> = {};
+    for (const n of nodes) {
+      const ws = new FakeSocket();
+      s.sockets.push(ws);
+      await s.hub.connectController(
+        ws,
+        new URL(
+          `https://example.com/api/chat/control?label=sub&node=${encodeURIComponent(n)}&agent=${encodeURIComponent(n.split("/").pop() ?? "")}`,
+        ),
+        token,
+      );
+      at[n] = ws;
+    }
+    return { ...s, p, root, at, token };
+  }
+  const observed = (ws: FakeSocket) =>
+    ws.sent.filter((m) => m.type === "chat").map((m) => m.observed === true);
+
+  it("exact node, ancestors observe, siblings excluded, the root sees everything", async () => {
+    const { p, root, at, msg } = await tree("/words", "/words/prefetch", "/words/audio");
+    await msg(p, { type: "chat", id: "m1", text: "go", to: "/words › prefetch" });
+    expect(chats(at["/words/prefetch"]!)).toMatchObject([{ id: "m1", to: "/words/prefetch" }]);
+    expect(observed(at["/words/prefetch"]!)).toEqual([false]);
+    expect(observed(at["/words"]!)).toEqual([true]);
+    expect(observed(root)).toEqual([true]);
+    expect(chats(at["/words/audio"]!)).toEqual([]);
+    expect(chats(p).at(-1)).toMatchObject({ id: "m1", to: "/words/prefetch" });
+  });
+
+  it("legacy agents count as the root; main-thread lines skip node agents", async () => {
+    const { p, root, at, msg } = await tree("/words");
+    await msg(p, { type: "chat", id: "m1", text: "hi" });
+    expect(chats(root).map((m) => m.id)).toEqual(["m1"]);
+    expect(chats(at["/words"]!)).toEqual([]);
+    expect(p.last("state")?.nodes).toEqual(["/words"]);
+  });
+
+  it("agent lines carry taskPath and agentId; a taskPath outside its node is refused", async () => {
+    const { p, at, msg } = await tree("/words/prefetch");
+    const c = at["/words/prefetch"]!;
+    await msg(c, { type: "say", text: "warming" });
+    expect(chats(p).at(-1)).toMatchObject({ taskPath: "/words/prefetch", agentId: "prefetch" });
+    await msg(c, { type: "say", text: "x", taskPath: "/home" });
+    expect(c.last("error")?.reason).toBe(
+      "taskPath /home is outside this agent's node /words/prefetch",
+    );
+  });
+
+  it("agent → agent: in-scope and upward allowed, siblings need a grant", async () => {
+    const { root, at, msg, tick } = await tree("/words", "/words/prefetch", "/words/audio");
+    await msg(at["/words"]!, { type: "say", text: "do X", to: "/words/prefetch" });
+    expect(chats(at["/words/prefetch"]!).at(-1)).toMatchObject({
+      text: "do X",
+      taskPath: "/words",
+    });
+    await msg(at["/words/prefetch"]!, { type: "say", text: "done", to: "/words" });
+    expect(chats(at["/words"]!).at(-1)).toMatchObject({ text: "done" });
+    await msg(at["/words/prefetch"]!, { type: "say", text: "hey", to: "/words/audio" });
+    expect(at["/words/prefetch"]!.last("error")?.reason).toBe(
+      "out of scope: needs a grant from /words",
+    );
+    await msg(root, { type: "grant", from: "/words/prefetch", to: "/words/audio", ms: 1000 });
+    expect(root.last("granted")).toMatchObject({ from: "/words/prefetch", to: "/words/audio" });
+    await msg(at["/words/prefetch"]!, { type: "say", text: "hey", to: "/words/audio" });
+    expect(chats(at["/words/audio"]!).at(-1)).toMatchObject({ text: "hey" });
+    tick(1001);
+    await msg(at["/words/prefetch"]!, { type: "say", text: "late", to: "/words/audio" });
+    expect(chats(at["/words/audio"]!).map((m) => m.text)).toEqual(["hey"]);
+    // The root saw all of it.
+    expect(chats(root).map((m) => m.text)).toEqual(["do X", "done", "hey"]);
   });
 });
