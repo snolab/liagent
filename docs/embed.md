@@ -356,6 +356,7 @@ effect.
 | `strings`     | `Partial<UiStrings>`            | The box's own strings (English; Chinese on a `zh` page, under yours).                                                                                                                                                                                   |
 | `micActive`   | `boolean`                       | A mic is on: treated as focus (the log opens, the box is opaque), and the debounce never sends by itself. Attribute: `mic-active`.                                                                                                                      |
 | `voice`       | `ChatVoice`                     | `{ speak(text, id?), stop(why?) }`: reads replies aloud instead of `speechSynthesis`. See [Voice input and output](#voice-input-and-output).                                                                                                            |
+| `voicePrefer` | `VoicePreference`               | `{ lang?, prefer? }`: the `speechSynthesis` voice when `voice` is not set. `lang` forces the language; `prefer` lists voice names to try first. See [The voice](#the-voice-lang-and-prefer).                                                            |
 
 **Methods:**
 
@@ -440,7 +441,11 @@ name from a visually hidden span instead.
   the menu or the tree.
 - **Expanded:** one scroller, the tree on top, the whole history below it,
   newest at the bottom. Three lines at rest; 30vh while the input has focus,
-  a mic is on, or the tree is open.
+  a mic is on, or the tree is open. The log lets taps through to the page,
+  so a mouse wheel, trackpad scroll or touch drag over the input scrolls
+  it, empty or not. When the typed text overflows the input, the input
+  scrolls first, and at its top or bottom end the rest of the same gesture
+  moves the log (`splitScroll` in `liagent/ui`). Taps still place the caret.
 - **Minimized:** new lines float over the bar for twice their reading time
   (at least 2.5 s), then fade over 10 s; hover or touch holds them, and the
   latest floats again on each minimize. The tree's frontier sits under them.
@@ -513,7 +518,8 @@ then calls `voice.speak(reply.text, reply.id)` for each reply that arrives
 live (when read-aloud is on, or a mic is on) instead of using
 `speechSynthesis`, and `voice.stop("typing")` when the user types (`"off"`
 when read-aloud is turned off). `box.speechRate` is the menu's speed for it to
-apply.
+apply. Without `voice`, `box.voicePrefer = { lang?, prefer? }` picks the
+`speechSynthesis` voice the same way `voice({ lang, prefer })` does (below).
 
 ## 7. Security notes
 
@@ -775,9 +781,11 @@ How it reads:
   newlines. A sentence over 200 characters is cut at a clause mark, else at
   a space. A new reply waits behind the one being read and never cuts it off.
 - **The voice.** The language comes from the script (kana → ja-JP, Hangul
-  → ko-KR, other Han → zh-CN, else en-US). Among the installed voices it
-  prefers Premium, then Enhanced or Siri, then the regular named voice, and
-  never iOS's Eloquence or novelty voices (`voiceQuality`, `pickNaturalVoice`).
+  → ko-KR, other Han → zh-CN, else en-US), unless `lang` is set. Among the
+  installed voices it prefers Premium, then Enhanced or Siri, then the
+  regular named voice, and never iOS's Eloquence or novelty voices
+  (`voiceQuality`, `pickNaturalVoice`). `prefer` names voices to try
+  first; see below.
 - **The speed** is `localStorage["liagent:speech-rate"]` (1, 1.25, 1.5 or 2;
   default 1.5). A change applies from the next sentence. Cloud audio keeps
   its pitch.
@@ -795,6 +803,30 @@ How it reads:
   that matches a sentence spoken in the last 10 s is dropped (`echoScore`,
   Dice over character n-grams). With `localStorage["liagent:voice-aec"] = "0"`,
   capture is held while the agent speaks and for 400 ms after.
+
+### The voice: `lang` and `prefer`
+
+```ts
+voice({ lang: "ja-JP", prefer: ["Google 日本語", "Microsoft Nanami", "Kyoko"] });
+```
+
+- `lang` forces the reading language for every reply (and the `lang` sent
+  to a TTS endpoint). Unset, it comes from each reply's script.
+- `prefer` lists voice names, best first. They are tried among the
+  installed voices of the reply's language (any region: `ja-JP` takes any
+  `ja-*` voice). An exact `name` match is tried first, for each entry in
+  order, then a case-insensitive substring. If none is installed, the
+  automatic pick is used. A name in another language is skipped.
+- Chrome lists its voices late (`getVoices()` is empty at first). The
+  choice is kept per language until `speechSynthesis` fires
+  `voiceschanged`, then made again, so a preferred voice that loads after
+  the first reply is used from the next sentence on.
+- A later `voice({ prefer })` or `voice({ lang })` changes them. To clear
+  one, pass `undefined` (`voice({ lang: undefined })`).
+
+`chooseVoice(voices, lang, { prefer }, fallback?)`, `preferredVoice` and
+`createVoicePicker` are the same logic as pure functions. A box without
+`voice` takes the same preference as `box.voicePrefer`.
 
 ### Cloud voices: your TTS endpoint (optional)
 
@@ -819,7 +851,7 @@ cached (64), and the next sentence is fetched while one plays. The one
 ### Reference
 
 `voice(options)`: `tts`, `ttsLimits`, `mode`, `enabled`, `here`, `aec`,
-`rate`, `log` (debug events such as `voice-out`, `voice-duck`,
+`rate`, `lang`, `prefer`, `log` (debug events such as `voice-out`, `voice-duck`,
 `voice-barge-in`). A later `voice(options)` changes them. `createVoice(deps)`
 is the same session with every browser piece injected, for tests or another
 runtime.

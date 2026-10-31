@@ -48,9 +48,12 @@ export {
   type Voice,
   type VoiceHook,
   type VoiceOptions,
+  type VoicePreference,
   type VoiceState,
+  chooseVoice,
   createVoice,
   pickNaturalVoice,
+  preferredVoice,
   voice,
   voiceQuality,
 } from "./voice.ts";

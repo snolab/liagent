@@ -9,6 +9,7 @@
 //   echo           the text-level echo guard for hands-free voice
 //   speech-rate    the read-aloud speed setting
 //   tap-gesture    single/double tap, drag flag, axis lock, long press
+//   scroll-handoff a scroll over the input split between it and the log
 //   ui-strings     the box's and the tree's strings in Chinese
 
 export * from "./tree-nav.ts";
@@ -19,4 +20,5 @@ export * from "./frontier-view.ts";
 export * from "./echo.ts";
 export * from "./speech-rate.ts";
 export * from "./tap-gesture.ts";
+export * from "./scroll-handoff.ts";
 export * from "./ui-strings.ts";

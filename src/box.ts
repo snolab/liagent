@@ -37,7 +37,8 @@
 //     whole history below it, newest at the bottom. The log is game-style
 //     text over the page, one line per message: a small round avatar, then
 //     the text, the time on hover; click-through, so the page under it still
-//     takes taps; a vertical swipe on the empty input scrolls it. Three lines
+//     takes taps; a wheel or swipe over the input scrolls it (text that
+//     overflows the input scrolls first, then hands the rest on). Three lines
 //     at rest; 30vh while the input has focus, a mic is on (`micActive`) or
 //     the tree is open; its top edge fades once it overflows.
 //   - Minimized: the lines that arrive float over the bar (src/float-lines.ts):
@@ -86,7 +87,8 @@
 //     shows, the debounce never sends by itself.
 //   - box.voice = { speak(text, id?), stop(why?) } reads replies aloud instead
 //     of speechSynthesis; typing calls voice.stop("typing"). box.speechRate is
-//     the menu's speed for it to apply.
+//     the menu's speed for it to apply. Without it, box.voicePrefer =
+//     { lang?, prefer? } picks the speechSynthesis voice (src/voice-pick.ts).
 //
 // Theming: set CSS custom properties on the element — --liagent-bg (the page
 // colour, for the halo and the translucent bar; default Canvas),
@@ -112,7 +114,6 @@ import {
   parseAddress,
   pathLabel,
   pickLang,
-  pickVoice,
   trimHistory,
 } from "./protocol.ts";
 import { DEBOUNCE_MS, afterChange, enterSends, lineBreakSends, partialTail } from "./input.ts";
@@ -150,6 +151,8 @@ import {
 } from "./frontier-view.ts";
 import { SPEECH_RATES, setSpeechRate, speechRate } from "./speech-rate.ts";
 import { createAxisLock, createDragFlag, createLongPress, createTapper } from "./tap-gesture.ts";
+import { type VoicePreference, createVoicePicker, readingLang, watchVoices } from "./voice-pick.ts";
+import { createSwipeHandoff, splitScroll, wheelPixels } from "./scroll-handoff.ts";
 import { type UiStrings, treeDefaults, uiStrings } from "./ui-strings.ts";
 import type { Assignee } from "./state-tree.ts";
 
@@ -162,6 +165,8 @@ export {
   initialOf,
   lineAvatar,
 } from "./avatar.ts";
+
+export type { VoicePreference } from "./voice-pick.ts";
 
 export type AnswerType = "allow" | "deny";
 /**
@@ -204,6 +209,11 @@ const Base: typeof HTMLElement =
   typeof HTMLElement === "undefined" ? (class {} as unknown as typeof HTMLElement) : HTMLElement;
 
 const synth = () => (typeof speechSynthesis === "undefined" ? null : speechSynthesis);
+/** The box's own read-aloud voice, chosen again whenever the device's voices change. */
+const voicePicker = createVoicePicker({
+  voices: () => synth()?.getVoices() ?? [],
+  watch: watchVoices,
+});
 let unlocked = false;
 /** iOS speaks only after a user gesture: an empty utterance on the first one unlocks it. */
 function unlockSpeech() {
@@ -542,6 +552,13 @@ export class ChatBox extends Base {
    * through it instead of speechSynthesis. Typing calls `stop("typing")`.
    */
   voice?: ChatVoice | null;
+  /**
+   * Read-aloud's voice when the box reads with speechSynthesis itself (no
+   * `voice` set): `lang` forces the language, `prefer` lists voice names to
+   * try first (exact, then substring; src/voice-pick.ts). With `voice` set,
+   * give the same to `voice({ lang, prefer })` instead.
+   */
+  voicePrefer?: VoicePreference | null;
 
   private _messages: ChatMessage[] = [];
   private _live = false;
@@ -915,9 +932,9 @@ export class ChatBox extends Base {
     const s = synth();
     if (!s) return;
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = pickLang(text);
+    u.lang = readingLang(this.voicePrefer, () => pickLang(text));
     u.rate = this.speechRate;
-    const voice = pickVoice(s.getVoices(), u.lang);
+    const voice = voicePicker.pick(u.lang, this.voicePrefer);
     if (voice) u.voice = voice;
     s.speak(u);
   }
@@ -1189,30 +1206,46 @@ export class ChatBox extends Base {
     this.swipeScrollsLog(ta);
   }
 
-  /** The log is click-through, so it can't be swiped: a vertical swipe on the empty input scrolls it. */
+  /**
+   * The log is click-through, so it can't be scrolled where it is: a wheel,
+   * trackpad or touch scroll over the input scrolls it instead, empty or not.
+   * Text that overflows the input scrolls first, and at its end the rest of
+   * the gesture goes on to the log (src/scroll-handoff.ts). A move the input
+   * scrolls itself is never cancelled, and a tap still places the caret.
+   */
   private swipeScrollsLog(el: HTMLTextAreaElement) {
-    let y = 0;
-    let swiping = false;
+    const toLog = (d: number) => {
+      if (!d) return;
+      this.els.column!.scrollTop += d;
+      this.userScrollAt = Date.now();
+    };
     el.addEventListener(
-      "touchstart",
+      "wheel",
       (e) => {
-        y = e.touches[0]!.clientY;
-        swiping = false;
+        if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+        const px = wheelPixels(e.deltaY, e.deltaMode, this.els.column!.clientHeight);
+        const { inputDelta, logDelta } = splitScroll(el, px);
+        // All of it fits the input: its own scroll, untouched.
+        if (!logDelta) return;
+        e.preventDefault();
+        if (inputDelta) el.scrollTop += inputDelta;
+        toLog(logDelta);
       },
-      { passive: true },
+      { passive: false },
     );
+    const swipe = createSwipeHandoff();
+    el.addEventListener("touchstart", (e) => swipe.start(e.touches[0]!.clientY), {
+      passive: true,
+    });
     el.addEventListener(
       "touchmove",
       (e) => {
-        // With text in it, the swipe scrolls the text.
-        if (el.value.length > 0) return;
-        const ny = e.touches[0]!.clientY;
-        if (!swiping && Math.abs(ny - y) < 6) return;
-        swiping = true;
-        this.els.column!.scrollTop -= ny - y;
-        this.userScrollAt = Date.now();
-        y = ny;
-        if (e.cancelable) e.preventDefault();
+        if (e.touches.length !== 1) return;
+        const step = swipe.move(el, e.touches[0]!.clientY, e.cancelable);
+        if (!step) return;
+        if (step.prevent) e.preventDefault();
+        if (step.inputDelta) el.scrollTop += step.inputDelta;
+        toLog(step.logDelta);
       },
       { passive: false },
     );

@@ -470,6 +470,9 @@ docs/embed.md, "Voice input".
 For hands-free replies, set `box.voice = mic.voice = voice()` (from
 `liagent/voice`). An optional `tts` endpoint (`GET ?lang=&text=` → audio)
 enables cloud voices. Without one, the device's voice is used.
+To pick it, pass `voice({ lang: "ja-JP", prefer: ["Kyoko"] })`: `lang`
+forces the language, and `prefer` lists voice names (exact, then
+substring) to try before the automatic pick.
 
 ### 3. Host the hub yourself
 

@@ -17,6 +17,9 @@
  *   voiceQuality), or "cloud": each sentence from the host's TTS endpoint,
  *   played through the page's own audio so the echo canceller hears it. A
  *   sentence the cloud cannot voice is read by speechSynthesis instead.
+ * - The voice (src/voice-pick.ts): `lang` forces the language (else from the
+ *   script), `prefer` names the voices to try first; the choice is made
+ *   again after speechSynthesis `voiceschanged`.
  * - The speed (src/speech-rate.ts, `liagent:speech-rate`) applies from the
  *   next utterance, on both outputs.
  * - Mic on: every reply is read, whatever the read-aloud toggle says (the
@@ -53,7 +56,10 @@ import {
   outMode,
 } from "./voice-out.ts";
 
+import { createVoicePicker, readingLang, watchVoices } from "./voice-pick.ts";
+
 export * from "./voice-out.ts";
+export * from "./voice-pick.ts";
 
 /** Capture resumes this long after the last utterance ends (the room's echo; hold mode). */
 export const RESUME_TAIL_MS = 400;
@@ -267,6 +273,8 @@ export function createVoice(d: {
   aec?: () => boolean;
   /** The reading speed, read for each utterance (speech-rate.ts; 1 if absent). */
   rate?: () => number;
+  /** A forced reading language (e.g. "ja-JP"); unset or empty: from the reply's script. */
+  lang?: () => string | undefined;
   /** In a gesture (the mic's tap): unlock the outputs for later, as iOS needs. */
   unlock?: () => void;
   now?: () => number;
@@ -510,7 +518,7 @@ export function createVoice(d: {
     /** A reply arrived live: queue its sentences (if it should be read). */
     reply(text: string): boolean {
       if (!canSpeak() || !api.shouldSpeak()) return false;
-      const lang = pickLang(text);
+      const lang = readingLang({ lang: d.lang?.() }, () => pickLang(text));
       const add = sentences(text)
         .flatMap((s) => chunk(s))
         .map((t) => ({ text: t, lang, from: 0, at: 0 }));
@@ -669,6 +677,14 @@ export type VoiceOptions = {
   aec?: () => boolean;
   /** The reading speed (default: `liagent:speech-rate`). */
   rate?: () => number;
+  /** The reading language, e.g. "ja-JP" (default: from each reply's script). */
+  lang?: string;
+  /**
+   * Voice names to try first, best first, among the voices of the reply's
+   * language: an exact `name`, else a substring of one (default: the most
+   * natural installed voice, pickNaturalVoice). Applies to speechSynthesis.
+   */
+  prefer?: readonly string[];
   log?: VoiceLog;
 };
 
@@ -689,6 +705,14 @@ export function voice(opts?: VoiceOptions): Voice & { configure(o: VoiceOptions)
     return have as Voice & { configure(o: VoiceOptions): void };
   }
   let o: VoiceOptions = { ...opts };
+  // Chosen per language until the device's voices change (Chrome lists them late).
+  const picker = createVoicePicker({
+    voices: () => (typeof speechSynthesis === "undefined" ? [] : speechSynthesis.getVoices()),
+    watch: watchVoices,
+    fallback: pickNaturalVoice,
+  });
+  // Starts loading them, so the first reply finds one.
+  if (typeof speechSynthesis !== "undefined") speechSynthesis.getVoices();
   if (o.tts !== undefined) cloudOut(o.tts, o.ttsLimits);
   const v = createVoice({
     synth,
@@ -698,6 +722,7 @@ export function voice(opts?: VoiceOptions): Voice & { configure(o: VoiceOptions)
     mode: () => (o.mode ?? outMode)(),
     aec: () => (o.aec ?? aecOn)(),
     rate: () => (o.rate ?? speechRate)(),
+    lang: () => o.lang,
     unlock: () => {
       if ((o.mode ?? outMode)() === "cloud" && cloudReady()) cloudOut()?.unlock();
     },
@@ -705,7 +730,7 @@ export function voice(opts?: VoiceOptions): Voice & { configure(o: VoiceOptions)
     utter: (text, lang) => {
       const u = new SpeechSynthesisUtterance(text);
       u.lang = lang;
-      const pick = pickNaturalVoice(speechSynthesis.getVoices(), lang);
+      const pick = picker.pick(lang, { prefer: o.prefer });
       if (pick) u.voice = pick;
       alive.add(u);
       u.addEventListener("end", () => alive.delete(u));
@@ -718,6 +743,7 @@ export function voice(opts?: VoiceOptions): Voice & { configure(o: VoiceOptions)
       o = { ...o, ...next };
       if (next.tts !== undefined || next.ttsLimits) cloudOut(o.tts ?? null, o.ttsLimits);
       if (next.log) v.setLog(next.log);
+      if ("prefer" in next || "lang" in next) picker.reset();
     },
   });
   g[VOICE_SESSION_KEY] = out;
