@@ -9,6 +9,18 @@ export { connectHub, type HubConnection, type HubOptions } from "./client.ts";
 export * from "./protocol.ts";
 export { DEBOUNCE_MS } from "./input.ts";
 export {
+  DEFAULT_QUIET_HOURS,
+  QUIET_HOURS_KEY,
+  type QuietHours,
+  type Silence,
+  type SpeakMeta,
+  inQuietWindow,
+  quietHours,
+  quietNow,
+  setQuietHours,
+  silenceFor,
+} from "./quiet-hours.ts";
+export {
   StateTreeElement,
   defineStateTree,
   frontierLines,

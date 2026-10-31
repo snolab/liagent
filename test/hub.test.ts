@@ -337,6 +337,33 @@ describe("ChatHub chat", () => {
     expect(c.last("said")?.id).toBe(chats(p).at(-1)?.id as string);
   });
 
+  it("say --quiet / --loud reach the pages and the history, only as boolean true", async () => {
+    const { page, controller, msg, pairOf } = setup();
+    const p = page();
+    const c = controller("main lane");
+    await msg(p, { type: "allow", pair: pairOf(p) });
+    await msg(c, { type: "say", text: "fyi", quiet: true });
+    await msg(c, { type: "say", text: "wake up", loud: true });
+    await msg(c, { type: "say", text: "both", quiet: true, loud: true });
+    await msg(c, { type: "say", text: "plain", quiet: "yes", loud: 1 });
+    const [fyi, wake, both, plain] = chats(p).slice(-4) as Record<string, unknown>[];
+    expect(fyi).toMatchObject({ text: "fyi", quiet: true });
+    expect(fyi).not.toHaveProperty("loud");
+    expect(wake).toMatchObject({ text: "wake up", loud: true });
+    expect(wake).not.toHaveProperty("quiet");
+    expect(both).toMatchObject({ text: "both", loud: true });
+    expect(both).not.toHaveProperty("quiet");
+    expect(plain).not.toHaveProperty("quiet");
+    expect(plain).not.toHaveProperty("loud");
+    // A reloaded page gets them in its history, the same.
+    const again = page();
+    await new Promise((r) => setTimeout(r, 0));
+    const h = (again.last("history") as { messages: Record<string, unknown>[] }).messages;
+    expect(h.find((m) => m.text === "fyi")).toMatchObject({ quiet: true });
+    expect(h.find((m) => m.text === "wake up")).toMatchObject({ loud: true });
+    expect(h.find((m) => m.text === "plain")).not.toHaveProperty("quiet");
+  });
+
   it("an unapproved controller cannot say", async () => {
     const { page, controller, msg } = setup();
     const p = page();
