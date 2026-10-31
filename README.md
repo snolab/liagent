@@ -47,11 +47,13 @@ The box is one glass bar, `[mark | tree | input … | mic]`: the mark minimizes
 it (tap), opens its menu (double tap) and moves it (drag); the tree button shows
 the state tree (`treeSource`) and drags sideways through its levels. Minimized,
 new lines float over the bar and the tree's frontier (✓ done, ▶ in progress,
-› next) sits under them.
+› next) sits under them. A wheel, trackpad or touch scroll over the input
+scrolls the log; text that overflows the input scrolls first, then hands the
+rest of the gesture on to the log.
 
 Properties: `messages`, `live`, `listeners`, `sessions`, `pending`, `evalRan`,
 `busy`, `guest`, `notice`, `warning`, `defaultOpen`, `placeholder`,
-`treeSource`, `strings`, `voice`, `micActive`, and the avatars: `agentAvatar`
+`treeSource`, `strings`, `voice`, `voicePrefer`, `micActive`, and the avatars: `agentAvatar`
 (set it to your app's logo), `userAvatar`, `userName`, `userId`.
 Callbacks: `onSend(text, to?, { source? }) → boolean`, `onAnswer(type, pair, scope?)`, `onEnd(pair)`,
 `avatarFor(message)` (a per-sender avatar).
@@ -103,7 +105,12 @@ mic.voice = v; // <liagent-mic>: talk over the agent to duck it, keep talking to
 
 `voice()` is one session per page. It reads with the device's most natural
 voice (or your TTS endpoint, `localStorage["liagent:voice-out"] = "cloud"`),
-at the box's speech rate. With the mic on, the browser's echo canceller and
+at the box's speech rate. To pick the voice, pass
+`voice({ lang: "ja-JP", prefer: ["Google 日本語", "Kyoko"] })`: `lang` forces
+the language (else it comes from the reply's script), and `prefer` lists
+voice names to try first (exact, then substring), with the automatic pick
+as the fallback. The choice is made again when the browser's voice list
+changes. With the mic on, the browser's echo canceller and
 a text-level echo guard keep the agent from hearing itself. See
 [docs/embed.md](docs/embed.md#9-hands-free-voice).
 
