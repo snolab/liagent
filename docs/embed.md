@@ -357,6 +357,7 @@ effect.
 | `micActive`   | `boolean`                       | A mic is on: treated as focus (the log opens, the box is opaque), and the debounce never sends by itself. Attribute: `mic-active`.                                                                                                                      |
 | `voice`       | `ChatVoice`                     | `{ speak(text, id?), stop(why?) }`: reads replies aloud instead of `speechSynthesis`. See [Voice input and output](#voice-input-and-output).                                                                                                            |
 | `voicePrefer` | `VoicePreference`               | `{ lang?, prefer? }`: the `speechSynthesis` voice when `voice` is not set. `lang` forces the language; `prefer` lists voice names to try first. See [The voice](#the-voice-lang-and-prefer).                                                            |
+| `quietHours`  | `QuietHours`                    | `{ on, from, to }` (local `"HH:MM"`): this device's quiet hours, when only loud lines are read aloud. On, 23:00–08:00 by default. Setting it saves the fields given. See [Quiet lines and quiet hours](#quiet-lines-and-quiet-hours).                   |
 
 **Methods:**
 
@@ -365,8 +366,14 @@ effect.
 - `beat()`: one busy beat. The spinner shows for 12 s unless another beat
   renews it or a reply ends it, and a beat within 1.5 s after a reply is
   ignored.
-- `speak(text, id?)`: reads text aloud if the device has read-aloud on (or a
-  mic is on), through `voice` if set, at `speechRate`.
+- `speak(text, id?, line?)`: reads text aloud if the device has read-aloud on (or a
+  mic is on), through `voice` if set, at `speechRate`. `line` is the
+  message (its `quiet` / `loud`), checked first against the page's
+  visibility and the quiet hours.
+
+**Events:** `liagent-silent`, `detail: { id, why }`, when a live line is
+kept silent (`why`: `"hidden"`, `"quiet"` or `"quiet-hours"`).
+
 - `submit() → boolean`: sends the draft now, as Enter would; true if it went
   out.
 - `draft`, `setDraft(text, { source? })`, `setPartial(text | null)`: the draft,
@@ -520,6 +527,44 @@ live (when read-aloud is on, or a mic is on) instead of using
 when read-aloud is turned off). `box.speechRate` is the menu's speed for it to
 apply. Without `voice`, `box.voicePrefer = { lang?, prefer? }` picks the
 `speechSynthesis` voice the same way `voice({ lang, prefer })` does (below).
+
+### Quiet lines and quiet hours
+
+Every agent line is shown; these rules decide whether it is also read
+aloud, for the box's own `speechSynthesis` and for a `voice` you set alike.
+In order:
+
+1. **A hidden page** (`document.visibilityState` is `"hidden"`: another
+   tab, the app in the background, the screen locked) never speaks, not
+   even a loud line. Hiding the page also stops a reading under way
+   (`voice.stop("hidden")`, which clears its queue).
+2. **A loud line** (`loud: true`, from `liagent say --loud`) is read by the
+   usual rules, quiet hours or not. The user's mute (read-aloud off in the
+   menu, with no mic on) still silences it.
+3. **A quiet line** (`quiet: true`, from `liagent say --quiet`) is never
+   read, even with a mic on.
+4. **Quiet hours:** nothing else is read inside them. They are a
+   device-local setting, `localStorage["<storage-key>:quiet-hours"]`
+   (default `liagent:quiet-hours`) = `{ on, from, to }`, on by default,
+   23:00–08:00 in the device's own time zone. A window whose end is before
+   its start wraps past midnight; `from` equal to `to` is empty.
+
+```js
+box.quietHours; // { on: true, from: "23:00", to: "08:00" }
+box.quietHours = { from: "22:30", to: "07:00" }; // the fields given replace the saved ones
+box.quietHours = { on: false }; // read everything, day and night
+```
+
+On the wire a say is `{type:"say", text, quiet?: true, loud?: true}`. The
+hub keeps each only as boolean `true`, drops anything else, and keeps only
+`loud` when both are sent. It copies them onto the `ChatMessage`, so pages
+get them live and in history. History is never read aloud either way. With
+your own transport, pass the message to `box.push(m)` and the box reads its
+`quiet` and `loud`; `box.speak(text, id, m)` does the same.
+
+The rules are pure functions in `liagent/ui` (`silenceFor`, `quietNow`,
+`inQuietWindow`, `quietHours`, `setQuietHours`) for hosts that read aloud
+some other way.
 
 ## 7. Security notes
 

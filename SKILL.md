@@ -122,6 +122,22 @@ echo "a longer reply" | liagent say -
 A plain `say` goes to the user's own thread. Reply to a friend only with
 `--to` and their email.
 
+### Quiet and loud: don't wake the user
+
+Every line is shown; these decide whether it is also read aloud:
+
+| Line                                                                 | Command                 | Read aloud                                     |
+| -------------------------------------------------------------------- | ----------------------- | ---------------------------------------------- |
+| FYI, progress, "deployed", "PR opened", anything the user didn't ask | `liagent say --quiet …` | never                                          |
+| the answer to what the user just said or asked                       | `liagent say …`         | yes, but not in their quiet hours              |
+| urgent, or it needs the user's answer now                            | `liagent say --loud …`  | yes, even in quiet hours, unless they muted it |
+
+Default to `--quiet` whenever the line is not a reply. `--loud` is rare:
+something broke in production, or a decision blocks you and the user is
+expected to be awake for it. `--quiet` and `--loud` together are refused.
+Quiet hours are the user's own, per device (default 23:00–08:00 local), and
+a page in the background never speaks at all.
+
 ## Agent edits of voice messages
 
 STT gets words wrong, and it has no context on the conversation; you do. A

@@ -58,6 +58,9 @@
 // pages and to every owner-approved agent in time — which hear every thread.
 // Friends chat without approval, at most `friendChatMax` per
 // `friendWindowMs`; the owner can block one (block(), or the internal API).
+// A say's `quiet: true` (never read aloud) or `loud: true` (read even in the
+// device's quiet hours) is copied onto its ChatMessage, live and in history;
+// anything but boolean true is dropped, and loud wins when both are sent.
 //
 // Pages. Each page socket has an id; `state` lists the audience's pages
 // ({id, label, at}) and the receiving page's own id (`self`). A page reports
@@ -1272,7 +1275,7 @@ export class ChatHub {
     if (m.value.type === "say") {
       if (c.forUser)
         return send(ws, { type: "error", error: "a pairing for a friend cannot chat" });
-      const { text, to, node, agentId } = m.value;
+      const { text, to, node, agentId, quiet, loud } = m.value;
       // The sender's node: what the line says, within the node its socket listens at.
       const home = c.node ?? ROOT_NODE;
       const from = m.value.taskPath ?? home;
@@ -1301,6 +1304,12 @@ export class ChatHub {
           ...(from !== ROOT_NODE ? { taskPath: from } : {}),
           ...(who ? { agentId: who } : {}),
           ...(node ? { to: node } : {}),
+          // Read aloud or not (src/quiet-hours.ts): only ever `true`, as parsed.
+          ...(loud === true
+            ? { loud: true as const }
+            : quiet === true
+              ? { quiet: true as const }
+              : {}),
         };
         log({
           msg: "chat.say",
@@ -1308,6 +1317,7 @@ export class ChatHub {
           agent: c.label,
           thread: said.thread,
           len: text.length,
+          ...(said.loud ? { loud: true } : said.quiet ? { quiet: true } : {}),
           ...this.head(text),
         });
         // Live, the owner's thread hears it only on the grant's pages.

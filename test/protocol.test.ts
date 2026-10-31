@@ -28,6 +28,24 @@ describe("parseControllerMessage", () => {
       value: { type: "say", text: "hi", to: "u1" },
     });
   });
+  test("say keeps quiet and loud only as boolean true; loud wins", () => {
+    const say = (extra: Record<string, unknown>) =>
+      parseControllerMessage(JSON.stringify({ type: "say", text: "hi", ...extra }));
+    expect(say({ quiet: true })).toEqual({
+      ok: true,
+      value: { type: "say", text: "hi", quiet: true },
+    });
+    expect(say({ loud: true })).toEqual({
+      ok: true,
+      value: { type: "say", text: "hi", loud: true },
+    });
+    expect(say({ quiet: true, loud: true })).toEqual({
+      ok: true,
+      value: { type: "say", text: "hi", loud: true },
+    });
+    for (const v of ["true", 1, false, null, {}, [true]])
+      expect(say({ quiet: v, loud: v })).toEqual({ ok: true, value: { type: "say", text: "hi" } });
+  });
   test("say needs text within MAX_CHAT", () => {
     expect(parseControllerMessage('{"type":"say","text":"  "}').ok).toBe(false);
     const long = JSON.stringify({ type: "say", text: "x".repeat(MAX_CHAT + 1) });
