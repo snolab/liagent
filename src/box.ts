@@ -70,11 +70,9 @@
 //     through `voice` when the host set one, else speechSynthesis in a
 //     language picked from their script; typing stops it, the menu turns it
 //     off for the device, and iOS is unlocked on the first gesture.
-//   - Quiet lines and quiet hours (src/quiet-hours.ts): a hidden page never
-//     speaks, and hiding it stops the reading; a line with `loud: true` is
-//     read by the usual rules; one with `quiet: true` never; inside the
-//     device's quiet hours (box.quietHours, default 23:00–08:00) only loud
-//     lines are. A line kept silent fires `liagent-silent` {id, why}.
+//   - Quiet lines (src/speak-rules.ts): a line with `quiet: true` is never
+//     read; a hidden page never speaks, and hiding it stops the reading. A
+//     line kept silent fires `liagent-silent` {id, why}.
 //   - Strings: Chinese on a zh page (src/ui-strings.ts); `strings` and
 //     `treeStrings` override them.
 //   - Text only: nothing a message holds is ever parsed as HTML.
@@ -159,14 +157,7 @@ import { createAxisLock, createDragFlag, createLongPress, createTapper } from ".
 import { type VoicePreference, createVoicePicker, readingLang, watchVoices } from "./voice-pick.ts";
 import { createSwipeHandoff, splitScroll, wheelPixels } from "./scroll-handoff.ts";
 import { type UiStrings, treeDefaults, uiStrings } from "./ui-strings.ts";
-import {
-  type QuietHours,
-  type SpeakMeta,
-  pageHidden,
-  quietHours,
-  setQuietHours,
-  silenceFor,
-} from "./quiet-hours.ts";
+import { RETIRED_SETTINGS, type SpeakMeta, pageHidden, silenceFor } from "./speak-rules.ts";
 import type { Assignee } from "./state-tree.ts";
 
 export {
@@ -180,7 +171,7 @@ export {
 } from "./avatar.ts";
 
 export type { VoicePreference } from "./voice-pick.ts";
-export type { QuietHours, Silence, SpeakMeta } from "./quiet-hours.ts";
+export type { Silence, SpeakMeta } from "./speak-rules.ts";
 
 export type AnswerType = "allow" | "deny";
 /**
@@ -926,22 +917,12 @@ export class ChatBox extends Base {
     getItem: () => this.read("speech-rate"),
     setItem: (_k: string, v: string) => this.write("speech-rate", v),
   };
-  /** The quiet hours under this box's storage key. */
-  private quietStore = {
-    getItem: () => this.read("quiet-hours"),
-    setItem: (_k: string, v: string) => this.write("quiet-hours", v),
-  };
-  /**
-   * This device's quiet hours, `{ on, from: "23:00", to: "08:00" }` (local
-   * time; a window ending before it starts wraps past midnight): only loud
-   * lines are read aloud inside them. On by default.
-   */
-  get quietHours(): QuietHours {
-    return quietHours(this.quietStore);
-  }
-  /** Save them for this device; the fields given replace the saved ones, the rest stay. */
-  set quietHours(v: Partial<QuietHours> | null) {
-    setQuietHours(v && typeof v === "object" ? v : {}, this.quietStore);
+  /** Remove settings an older version saved that mean nothing now (speak-rules.ts). */
+  private dropRetired() {
+    for (const name of RETIRED_SETTINGS)
+      try {
+        localStorage.removeItem(this.key(name));
+      } catch {}
   }
   /** Whether agent replies are read aloud on this device (on unless turned off). */
   get speaking() {
@@ -956,11 +937,11 @@ export class ChatBox extends Base {
    * Read a reply aloud, after any still being read (always while a mic is on):
    * through `voice` if set, else speechSynthesis, in the language its script
    * suggests (with a matching installed voice), at `speechRate`. `line`
-   * (the message's `quiet` / `loud`) is checked first, against the page's
-   * visibility and the quiet hours (src/quiet-hours.ts), for both outputs.
+   * (the message's `quiet`) is checked first, with the page's visibility
+   * (src/speak-rules.ts), for both outputs.
    */
   speak(text: string, id?: string, line: SpeakMeta = {}) {
-    const why = silenceFor(line, { now: new Date(), hidden: pageHidden(), hours: this.quietHours });
+    const why = silenceFor(line, { hidden: pageHidden() });
     if (why) {
       this.dispatchEvent(new CustomEvent("liagent-silent", { detail: { id, why } }));
       return;
@@ -991,6 +972,7 @@ export class ChatBox extends Base {
     addEventListener("orientationchange", this.relayout);
     globalThis.visualViewport?.addEventListener("resize", this.relayout);
     document.addEventListener("visibilitychange", this.pageHid);
+    this.dropRetired();
     if (this.root) {
       this.loadTree();
       return;

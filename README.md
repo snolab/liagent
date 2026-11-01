@@ -53,7 +53,7 @@ rest of the gesture on to the log.
 
 Properties: `messages`, `live`, `listeners`, `sessions`, `pending`, `evalRan`,
 `busy`, `guest`, `notice`, `warning`, `defaultOpen`, `placeholder`,
-`treeSource`, `strings`, `voice`, `voicePrefer`, `quietHours`, `micActive`, and the avatars: `agentAvatar`
+`treeSource`, `strings`, `voice`, `voicePrefer`, `micActive`, and the avatars: `agentAvatar`
 (set it to your app's logo), `userAvatar`, `userName`, `userId`.
 Callbacks: `onSend(text, to?, { source? }) → boolean`, `onAnswer(type, pair, scope?)`, `onEnd(pair)`,
 `avatarFor(message)` (a per-sender avatar).
@@ -114,16 +114,9 @@ changes. With the mic on, the browser's echo canceller and
 a text-level echo guard keep the agent from hearing itself. See
 [docs/embed.md](docs/embed.md#9-hands-free-voice).
 
-Not every line should be spoken. A hidden page never speaks (and hiding it
-stops the reading); `liagent say --quiet` lines are shown but never read;
-inside the device's quiet hours only `say --loud` lines are read. Quiet
-hours are on by default, 23:00–08:00 in the device's local time:
-
-```js
-box.quietHours = { on: true, from: "22:30", to: "07:00" }; // per device, under liagent:quiet-hours
-```
-
-See [docs/embed.md](docs/embed.md#quiet-lines-and-quiet-hours).
+Not every line should be spoken. `liagent say --quiet` lines are shown but
+never read, and a hidden page never speaks (hiding it stops the reading).
+See [docs/embed.md](docs/embed.md#quiet-lines).
 
 ## The hub
 
@@ -180,7 +173,7 @@ export LIAGENT_HUB=https://dev.example.com/api/chat
 liagent pair                 # prints a code; the user taps Allow in the box
 liagent listen --to <agent>  # messages → JSON lines, and into an agent-yes agent
 liagent say "On it."         # reply in the box
-liagent say --quiet "PR opened."  # shown, never read aloud; --loud: read even in quiet hours
+liagent say --quiet "PR opened."  # shown, never read aloud
 liagent busy --every 4 &     # the box's spinner, until your next reply
 liagent eval 'document.title'  # eval hubs only; the user allows it on chosen pages
 LIAGENT_TASK_PATH=/words/prefetch liagent say "warming"  # a sub-agent, shown as "/words › prefetch"

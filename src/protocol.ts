@@ -15,7 +15,7 @@
 //                     {type:"history", messages} | {type:"chat", message}
 //                     {type:"busy", label, at} | {type:"eval", id, code, to}
 //                     {type:"edited", id, thread, text, raw, edited}   (a voice line polished)
-//   agent → hub       {type:"say", text, to?, taskPath?, agentId?, quiet?, loud?} | {type:"busy", to?}
+//   agent → hub       {type:"say", text, to?, taskPath?, agentId?, quiet?} | {type:"busy", to?}
 //                     {type:"eval", code, target?} | {type:"grant"|"ungrant", from, to, ms?}
 //                     {type:"edit", id, text}   (polish the owner's latest stt line)
 //   hub → agent       {type:"pending", code} | {type:"approved", until, scope, pages, token?}
@@ -116,8 +116,6 @@ export type ChatMessage = {
   raw?: string;
   /** An agent line never read aloud (`say --quiet`: FYI, progress). Only ever `true`. */
   quiet?: true;
-  /** An agent line read aloud even in the device's quiet hours (`say --loud`). Only ever `true`. */
-  loud?: true;
   /** Set when the agent polished the line: when, by which agent, and how many times. */
   edited?: EditMark;
 };
@@ -207,10 +205,8 @@ export type ControllerMessage =
       node?: string;
       taskPath?: string;
       agentId?: string;
-      /** Never read aloud. Kept only as boolean true, and dropped when `loud` is set too. */
+      /** Never read aloud. Kept only as boolean true. */
       quiet?: true;
-      /** Read aloud even in quiet hours. Kept only as boolean true. */
-      loud?: true;
     }
   | { type: "busy"; to?: string; on?: boolean }
   /** Polish the owner's latest line, when it came from the box's mic (`source: "stt"`). */
@@ -282,9 +278,8 @@ export function parseControllerMessage(
     if (node) value.node = node;
     if (taskPath && taskPath !== ROOT_NODE) value.taskPath = taskPath;
     if (agentId) value.agentId = agentId;
-    // Volume: only boolean true counts; loud wins over quiet.
-    if (m.loud === true) value.loud = true;
-    else if (m.quiet === true) value.quiet = true;
+    // Only boolean true counts. An old `loud` is dropped: it means nothing now.
+    if (m.quiet === true) value.quiet = true;
     return { ok: true, value };
   }
   if (m?.type === "edit") {
