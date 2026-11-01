@@ -22,12 +22,11 @@ const USAGE = `liagent — the agent's side of the user ⇄ agent chat (src/hub.
       the saved grant and reconnects on network drops (backing off from 1 s
       to a minute) without ever asking the user again; see "Pairing".
 
-  liagent say    [hub] "text" | -   [--to <email|user id>] [--quiet | --loud]
+  liagent say    [hub] "text" | -   [--to <email|user id>] [--quiet]
       Reply in the box (the user's thread, or a friend's), then exit.
       --quiet: shown, never read aloud (FYI, progress, notices: anything
-      the user did not ask for). --loud: read aloud even in the user's
-      quiet hours (default 23:00–08:00 on their device); keep it for what
-      is urgent or needs them now. A hidden page never reads either.
+      the user did not ask for). A hidden page never reads aloud.
+      --loud is deprecated: accepted and ignored (a plain say).
 
   liagent say    [hub] "text" --to /words/audio
       Address a state-tree node instead (a --to starting with "/"): its
@@ -524,11 +523,9 @@ async function main() {
   if (cmd === "say") {
     const to = flag("--to");
     const quiet = takeSwitch("--quiet");
-    const loud = takeSwitch("--loud");
-    if (quiet && loud) {
-      console.error("liagent: --quiet and --loud together make no sense; pick one");
-      process.exit(2);
-    }
+    // Deprecated: it does nothing now; accepted so old commands still work.
+    if (takeSwitch("--loud"))
+      console.error("liagent: say --loud is deprecated and does nothing (a plain say)");
     const text = await readText();
     if (!text) usage(2);
     const ws = await connectOrExit(hub);
@@ -541,7 +538,6 @@ async function main() {
         ...(place.node ? { taskPath: place.node } : {}),
         ...(place.agent ? { agentId: place.agent } : {}),
         ...(quiet ? { quiet: true } : {}),
-        ...(loud ? { loud: true } : {}),
       },
       "said",
     );

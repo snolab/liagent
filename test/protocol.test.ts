@@ -28,20 +28,17 @@ describe("parseControllerMessage", () => {
       value: { type: "say", text: "hi", to: "u1" },
     });
   });
-  test("say keeps quiet and loud only as boolean true; loud wins", () => {
+  test("say keeps quiet only as boolean true; an old loud is dropped", () => {
     const say = (extra: Record<string, unknown>) =>
       parseControllerMessage(JSON.stringify({ type: "say", text: "hi", ...extra }));
     expect(say({ quiet: true })).toEqual({
       ok: true,
       value: { type: "say", text: "hi", quiet: true },
     });
-    expect(say({ loud: true })).toEqual({
-      ok: true,
-      value: { type: "say", text: "hi", loud: true },
-    });
+    expect(say({ loud: true })).toEqual({ ok: true, value: { type: "say", text: "hi" } });
     expect(say({ quiet: true, loud: true })).toEqual({
       ok: true,
-      value: { type: "say", text: "hi", loud: true },
+      value: { type: "say", text: "hi", quiet: true },
     });
     for (const v of ["true", 1, false, null, {}, [true]])
       expect(say({ quiet: v, loud: v })).toEqual({ ok: true, value: { type: "say", text: "hi" } });
