@@ -205,11 +205,44 @@ export function createMicSession<C = unknown>(
     for (const t of stream?.getTracks() ?? []) t.stop();
     stream = null;
   };
+  /** Bumped by every off: a stream that arrives after an off is stopped, never used. */
+  let epoch = 0;
+  const cancelled = () =>
+    Object.assign(new Error("mic turned off while starting"), { name: "AbortError" });
+  const freshStream = async () => {
+    const e = epoch;
+    const s = await ensureStream();
+    if (e !== epoch) {
+      for (const t of s.getTracks()) t.stop();
+      if (stream === s) stream = null;
+      throw cancelled();
+    }
+    return s;
+  };
   const fallback = deps.fallback;
   let prev: MicState = "off";
   const mic = createMic({
-    load: async (ev) => deps.load(ev, await ensureStream(), cfg),
-    fallback: fallback ? async (ev) => fallback(ev, await ensureStream(), cfg) : undefined,
+    load: async (ev) => {
+      const e = epoch;
+      const s = await freshStream();
+      try {
+        return await deps.load(ev, s, cfg);
+      } finally {
+        // Off while the VAD was loading: the tracks stop now, whatever the load does.
+        if (e !== epoch) for (const t of s.getTracks()) t.stop();
+      }
+    },
+    fallback: fallback
+      ? async (ev) => {
+          const e = epoch;
+          const s = await freshStream();
+          try {
+            return await fallback(ev, s, cfg);
+          } finally {
+            if (e !== epoch) for (const t of s.getTracks()) t.stop();
+          }
+        }
+      : undefined,
     upload: async (wav, info) => {
       const text = await deps.upload(wav, info, cfg);
       // The text guard: the agent's own words that leaked past the echo canceller are dropped.
@@ -304,8 +337,13 @@ export function createMicSession<C = unknown>(
       offs++;
       store.clear();
       emit({ resume: false });
-      await mic.off();
-      stopStream();
+      epoch++;
+      // The tracks stop whatever the VAD cleanup does (a half-initialised VAD throws).
+      try {
+        await mic.off();
+      } finally {
+        stopStream();
+      }
     },
     hold: (on: boolean) => mic.hold(on),
     /**
