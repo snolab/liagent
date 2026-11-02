@@ -527,6 +527,11 @@ export function createMic(d: {
         .finally(report);
     },
   });
+  const quietly = async (f: () => unknown) => {
+    try {
+      await f();
+    } catch {}
+  };
   const on = async () => {
     const g = ++gen;
     partialsOn = d.partials !== false;
@@ -536,21 +541,38 @@ export function createMic(d: {
       v = await d.load(events(g));
     } catch (e) {
       if (!d.fallback || isMicDenied(e)) {
-        if (g === gen) set("off");
-        d.onError?.(e);
+        if (g === gen) {
+          set("off");
+          d.onError?.(e);
+        }
         return;
       }
       try {
         v = await d.fallback(events(g));
       } catch (e2) {
-        if (g === gen) set("off");
-        d.onError?.(e2);
+        if (g === gen) {
+          set("off");
+          d.onError?.(e2);
+        }
         return;
       }
     }
-    if (g !== gen) return void v.destroy();
+    // Turned off (or on again) while loading: this VAD is stale, never "listening".
+    if (g !== gen) return void (await quietly(() => v.destroy()));
     vad = v;
-    if (!held) await v.start();
+    if (!held) {
+      try {
+        await v.start();
+      } catch (e) {
+        if (g !== gen) return;
+        vad = null;
+        await quietly(() => v.destroy());
+        set("off");
+        d.onError?.(e);
+        return;
+      }
+    }
+    if (g !== gen) return; // off() took this VAD while start() was pending
     set("listening");
   };
   async function off() {
@@ -566,8 +588,9 @@ export function createMic(d: {
     set("off");
     if (v) {
       // Speech under way when listening stops is still sent.
-      await v.flush();
-      await v.destroy();
+      // A half-initialised VAD may throw here: the off goes on regardless.
+      await quietly(() => v.flush());
+      await quietly(() => v.destroy());
     }
     if (reserved !== null) {
       cur = reserved;
