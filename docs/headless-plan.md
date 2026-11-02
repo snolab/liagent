@@ -1,6 +1,6 @@
 # Plan: headless liagent
 
-Status: approved by the owner (2026-11-03: the names, React hooks in the package, allow() only from a user tap, voice and mic as their own stores). Steps 1–3 are in the first PR; 4–6 follow.
+Status: approved by the owner (2026-11-03: the names, React hooks in the package, allow() only from a user tap, voice and mic as their own stores). Steps 1–3 are in the first PR (#22); 4–5 in the second; 6 is the release.
 
 ## Goal
 
