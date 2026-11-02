@@ -5,7 +5,18 @@
 //   defineChatBox();
 
 export { ChatBox, defineChatBox } from "./box.ts";
-export { connectHub, type HubConnection, type HubOptions } from "./client.ts";
+export { connectHub, hubTransport, type HubConnection, type HubOptions } from "./client.ts";
+export {
+  type Chat,
+  type ChatEvents,
+  type ChatOptions,
+  type ChatState,
+  type ChatStatus,
+  type OutboxEntry,
+  type Transport,
+  type TransportSink,
+  createChat,
+} from "./core.ts";
 export * from "./protocol.ts";
 export { DEBOUNCE_MS } from "./input.ts";
 export { type Silence, type SpeakMeta, isQuiet, silenceFor } from "./speak-rules.ts";
