@@ -135,6 +135,10 @@ Default to `--quiet` whenever the line is not a reply. A page in the
 background never speaks. `--loud` is deprecated: it is accepted and does
 nothing.
 
+Reading in the right voice: the box guesses the language from the script
+alone (Japanese, Korean, Chinese, else English). When you reply in another
+language, say which: `liagent say --lang fr-FR "Bonjour."` (any BCP-47 tag).
+
 ## Agent edits of voice messages
 
 STT gets words wrong, and it has no context on the conversation; you do. A

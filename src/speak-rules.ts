@@ -13,8 +13,12 @@
  * Pure: test/speak-rules.test.ts.
  */
 
-/** What a line says about being read aloud (ChatMessage's `quiet`). */
-export type SpeakMeta = { quiet?: unknown };
+/**
+ * What a line says about being read aloud (ChatMessage's `quiet` and
+ * `lang`). `lang` (a BCP-47 tag, checked with protocol's langTag) picks the
+ * reading language; it never silences a line.
+ */
+export type SpeakMeta = { quiet?: unknown; lang?: unknown };
 
 /** Quiet: `say --quiet`. Only boolean true counts. */
 export const isQuiet = (m: SpeakMeta) => m.quiet === true;

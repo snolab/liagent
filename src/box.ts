@@ -67,9 +67,11 @@
 //     that node (typing "@/" offers `nodes`); the target is a removable chip.
 //     box.setTarget(path) sets it from outside (a state tree's selection).
 //   - Agent replies that arrive live are read aloud, at the menu's speed:
-//     through `voice` when the host set one, else speechSynthesis in a
-//     language picked from their script; typing stops it, the menu turns it
-//     off for the device, and iOS is unlocked on the first gesture.
+//     through `voice` when the host set one, else speechSynthesis. The
+//     language is the message's own `lang` (a BCP-47 tag) if it has one,
+//     else `voicePrefer.lang`, else one picked from the script (ja/ko/zh/en);
+//     typing stops it, the menu turns it off for the device, and iOS is
+//     unlocked on the first gesture.
 //   - Quiet lines (src/speak-rules.ts): a line with `quiet: true` is never
 //     read; a hidden page never speaks, and hiding it stops the reading. A
 //     line kept silent fires `liagent-silent` {id, why}.
@@ -97,8 +99,9 @@
 //   - box.micActive = true (or the mic-active attribute) counts as focus: the
 //     log opens and the box goes opaque; while it is on, and while a partial
 //     shows, the debounce never sends by itself.
-//   - box.voice = { speak(text, id?), stop(why?) } reads replies aloud instead
-//     of speechSynthesis; typing calls voice.stop("typing"). box.speechRate is
+//   - box.voice = { speak(text, id?, { lang? }?), stop(why?) } reads replies
+//     aloud instead of speechSynthesis (the third argument only for a line
+//     with its own `lang`); typing calls voice.stop("typing"). box.speechRate is
 //     the menu's speed for it to apply. Without it, box.voicePrefer =
 //     { lang?, prefer? } picks the speechSynthesis voice (src/voice-pick.ts).
 //
@@ -121,6 +124,7 @@ import {
   completeNode,
   dictatedDraft,
   draftSource,
+  langTag,
   lineNode,
   nodePath,
   parseAddress,
@@ -195,10 +199,14 @@ export type Answer = { pages?: string[] | "all"; scope?: "chat" };
 
 /**
  * A voice output the host plugs in (box.voice): replies are read through it
- * instead of speechSynthesis. `id` is the message's id; `stop` gets why
+ * instead of speechSynthesis. `id` is the message's id; `opts.lang` is the
+ * message's own language (passed only when it has one); `stop` gets why
  * ("typing", "off").
  */
-export type ChatVoice = { speak(text: string, id?: string): void; stop(why?: string): void };
+export type ChatVoice = {
+  speak(text: string, id?: string, opts?: { lang?: string }): void;
+  stop(why?: string): void;
+};
 
 /** A page's label is "<path> <user agent>": the path and a short device hint. */
 export function pageHint(label: string): string {
@@ -571,8 +579,9 @@ export class ChatBox extends Base {
    */
   avatarFor?: (m: ChatMessage) => Sender | null | undefined;
   /**
-   * A voice output (`{ speak(text, id?), stop(why?) }`): replies are read
-   * through it instead of speechSynthesis. Typing calls `stop("typing")`.
+   * A voice output (`{ speak(text, id?, { lang? }?), stop(why?) }`): replies
+   * are read through it instead of speechSynthesis. Typing calls
+   * `stop("typing")`.
    */
   voice?: ChatVoice | null;
   /**
@@ -972,10 +981,11 @@ export class ChatBox extends Base {
 
   /**
    * Read a reply aloud, after any still being read (always while a mic is on):
-   * through `voice` if set, else speechSynthesis, in the language its script
-   * suggests (with a matching installed voice), at `speechRate`. `line`
-   * (the message's `quiet`) is checked first, with the page's visibility
-   * (src/speak-rules.ts), for both outputs.
+   * through `voice` if set, else speechSynthesis, at `speechRate`. `line` is
+   * the message: its `quiet` is checked first, with the page's visibility
+   * (src/speak-rules.ts), for both outputs; its `lang` (a BCP-47 tag) is the
+   * reading language, ahead of `voicePrefer.lang` and the script's guess
+   * (with a matching installed voice).
    */
   speak(text: string, id?: string, line: SpeakMeta = {}) {
     const why = silenceFor(line, { hidden: pageHidden() });
@@ -984,11 +994,12 @@ export class ChatBox extends Base {
       return;
     }
     if (!this.speaking && !this._micActive) return;
-    if (this.voice) return this.voice.speak(text, id);
+    const lang = langTag(line.lang);
+    if (this.voice) return lang ? this.voice.speak(text, id, { lang }) : this.voice.speak(text, id);
     const s = synth();
     if (!s) return;
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = readingLang(this.voicePrefer, () => pickLang(text));
+    u.lang = lang ?? readingLang(this.voicePrefer, () => pickLang(text));
     u.rate = this.speechRate;
     const voice = voicePicker.pick(u.lang, this.voicePrefer);
     if (voice) u.voice = voice;
