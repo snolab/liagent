@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **One frame while typing.** While the typing glass is up it is the frame,
+  so the bar's own box is no longer drawn inside it: its border turns
+  transparent (the width stays, so nothing moves), its tint and blur go, and
+  it fades with the glass; at rest the border is back. Inside the glass the
+  "@/" node list is plain rows and the attached chip keeps only its rail. The
+  - menu drops its border (its shadow is its edge).
+
 ## 0.2.0 (2026-11-03)
 
 ### Added

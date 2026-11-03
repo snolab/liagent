@@ -100,7 +100,10 @@
 //   - Typing glass: while the input has the focus, the box's own area (the
 //     shown log and the bar) gets a frosted backdrop; the rest of the page
 //     stays sharp and takes taps. Solid where backdrop-filter is missing or
-//     transparency is reduced; no fade under reduced motion.
+//     transparency is reduced; no fade under reduced motion. One frame:
+//     while the glass is up, the bar's own box is not drawn inside it
+//     (border transparent with its width kept, no tint, no blur), nor are
+//     the "@/" list's and the attached chip's; at rest they come back.
 //   - A log at its newest line stays there when it or the input changes
 //     size (src/log-pin.ts); only the user's own scroll leaves the end.
 //
@@ -453,7 +456,12 @@ img.av { display: block; object-fit: cover; }
   padding: var(--bar-pad); border-radius: var(--bar-r); border: var(--bar-b) solid var(--line); background: var(--glass);
   backdrop-filter: blur(12px) saturate(1.5); -webkit-backdrop-filter: blur(12px) saturate(1.5);
   touch-action: none; text-shadow: none;
+  transition: border-color .15s ease-out, background-color .15s ease-out;
 }
+/* One frame while typing: the glass is the frame, so the bar's own box is not
+   drawn inside it. The border goes transparent (its width stays, so nothing
+   moves); its tint and blur go. At rest the border is back. */
+.box.typing .bar { border-color: transparent; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
 .min { --bar-pad: var(--liagent-bar-pad-min, 1px); }
 /* 40px targets: the hit area reaches 40px whatever the drawn size. */
 .tap { position: relative; flex: none; width: max(40px, var(--control)); height: var(--control); display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; }
@@ -505,7 +513,7 @@ textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent
 .amenu {
   pointer-events: auto; position: absolute; bottom: 100%; left: 0; margin-bottom: 4px; z-index: 1;
   width: min(17rem, 100%); max-height: 60vh; overflow-y: auto; padding: 4px; text-shadow: none;
-  border-radius: calc(var(--bar-r) - 2px); border: 1px solid var(--line);
+  border-radius: calc(var(--bar-r) - 2px);
   background: var(--liagent-menu-bg, color-mix(in oklch, var(--bg) 92%, transparent));
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
   box-shadow: 0 12px 32px -10px color-mix(in oklch, CanvasText 40%, transparent);
@@ -528,6 +536,8 @@ textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent
   border-inline-start: 2px solid var(--accent); border-radius: 8px; background: color-mix(in oklch, var(--accent) 10%, var(--glass));
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
 }
+/* Inside the glass: the rail alone, no tinted box of its own. */
+.box.typing .attached { border-radius: 0; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
 .attached .what { flex: 1; min-width: 0; }
 .attached .x { all: unset; cursor: pointer; flex: none; padding: 0 6px; color: var(--muted); font-size: 13px; line-height: 1.35; }
 .quote, .attached .q {
@@ -553,6 +563,8 @@ textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent
 .target.preview { opacity: .7; }
 .target button { all: unset; cursor: pointer; line-height: 1; }
 .nodes { list-style: none; margin: 0; padding: 2px 0; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; font-size: 11px; background: var(--glass); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+/* Inside the glass: plain rows on it, no second box. */
+.box.typing .nodes { border-color: transparent; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
 .nodes button { all: unset; display: block; cursor: pointer; padding: 1px 8px; }
 /* Minimized: the tree, the floating lines and the frontier, on the bar's side. */
 .floatbox {
@@ -609,7 +621,7 @@ textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent
 .menu [aria-checked="false"] svg { opacity: .45; }
 ${TREE_CHIPS_CSS}
 @media (prefers-reduced-motion: reduce) {
-  .rowbox, .slot, .column, .box, .box::before, .float.fading { transition: none !important; }
+  .rowbox, .slot, .column, .box, .box::before, .bar, .float.fading { transition: none !important; }
   .blink, .treepanel, .evals.ran { animation: none; }
 }
 [hidden] { display: none !important; }
