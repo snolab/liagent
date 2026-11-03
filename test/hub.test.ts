@@ -299,6 +299,7 @@ type Chat = {
     taskPath?: string;
     agentId?: string;
     to?: string;
+    context?: unknown;
   };
 };
 const chats = (ws: FakeSocket) =>
@@ -325,6 +326,34 @@ describe("ChatHub chat", () => {
         },
       ]);
     expect(chats(waiting)).toEqual([]);
+  });
+
+  it("a line's attached context is cleaned, kept and passed on", async () => {
+    const { page, controller, msg, pairOf } = setup();
+    const p = page();
+    const agent = controller("agent");
+    await msg(p, { type: "allow", pair: pairOf(p) });
+    await msg(p, {
+      type: "chat",
+      id: "q1",
+      text: "what is this?",
+      context: {
+        selection: "a phrase",
+        path: "/docs?secret=1",
+        files: [
+          { name: "a.png", url: "https://cdn.example/a.png" },
+          { name: "x", url: "javascript:alert(1)" },
+        ],
+        junk: true,
+      },
+    });
+    const want = {
+      selection: "a phrase",
+      path: "/docs",
+      files: [{ name: "a.png", url: "https://cdn.example/a.png" }],
+    };
+    expect(chats(p).at(-1)?.context).toEqual(want);
+    expect(chats(agent).at(-1)?.context).toEqual(want);
   });
 
   it("a controller's say reaches the pages and is acknowledged", async () => {

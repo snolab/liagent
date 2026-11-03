@@ -23,7 +23,7 @@ import { type MicState, type UploadInfo, type Vad, type VadEvents, createMic } f
 /** globalThis key of the session. */
 export const MIC_SESSION_KEY = "__liagentMic";
 /** Bumped when the session's shape changes; an older one is migrated, its stream kept. */
-export const MIC_SESSION_V = 1;
+export const MIC_SESSION_V = 2;
 /** sessionStorage: "1" while this tab has the mic on (cleared by an explicit off). */
 export const MIC_ON_KEY = "liagent:mic";
 
@@ -164,6 +164,13 @@ export function createMicSession<C = unknown>(
   /** Transcripts that landed while nothing was attached (mid-remount): handed over on attach. */
   let held: string[] = [];
   let gumCalls = 0;
+  /** Capture held for the agent's voice (the link's state) and for the page's own audio. */
+  let voiceHold = false;
+  let pageHold = false;
+  /** Bumped by an explicit off: a reopen in flight never turns the mic back on after it. */
+  let offs = 0;
+  let reopening: Promise<boolean> | null = null;
+  let reopenAgain = false;
   const emit = (patch: Partial<MicView>) => {
     view = { ...view, ...patch };
     for (const f of listeners) f(view);
@@ -269,12 +276,14 @@ export function createMicSession<C = unknown>(
       unvoice = null;
       voice = link;
       if (!link) {
-        mic.hold(false);
+        voiceHold = false;
+        mic.hold(pageHold);
         emit({ speaking: false });
         return;
       }
       const follow = (s: VoiceLinkState) => {
-        mic.hold(s.hold);
+        voiceHold = s.hold;
+        mic.hold(voiceHold || pageHold);
         if (s.speaking !== view.speaking) emit({ speaking: s.speaking });
       };
       follow(link.state());
@@ -292,12 +301,48 @@ export function createMicSession<C = unknown>(
     },
     /** The explicit off: the VAD, the stream and the reload flag all go. */
     async off() {
+      offs++;
       store.clear();
       emit({ resume: false });
       await mic.off();
       stopStream();
     },
     hold: (on: boolean) => mic.hold(on),
+    /**
+     * The page plays its own audio (src/page-audio.ts) with echo cancellation
+     * off: capture is held while it does, together with the voice's hold.
+     */
+    setPageHold(on: boolean) {
+      pageHold = on;
+      mic.hold(voiceHold || pageHold);
+    },
+    /**
+     * Open the mic again with the current configuration (echo cancellation
+     * switched, src/aec.ts): a new stream, the same session. False when the
+     * mic is off (nothing to do) or an explicit off came in between. Calls
+     * during a reopen run one more pass instead of overlapping.
+     */
+    reopen(): Promise<boolean> {
+      if (mic.state() === "off") return Promise.resolve(false);
+      if (reopening) {
+        reopenAgain = true;
+        return reopening;
+      }
+      const epoch = offs;
+      reopening = (async () => {
+        do {
+          reopenAgain = false;
+          await mic.off();
+          stopStream();
+          if (offs !== epoch) return false;
+          await mic.toggle();
+        } while (reopenAgain && offs === epoch);
+        return mic.state() !== "off";
+      })().finally(() => {
+        reopening = null;
+      });
+      return reopening;
+    },
     /**
      * Replaced by a newer session: the VAD goes, the stream stays (the new
      * session builds its VAD on it).

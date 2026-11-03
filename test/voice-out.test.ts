@@ -74,7 +74,13 @@ describe("voice-out: the switches", () => {
       channelCount: 1,
     });
     expect(AEC_CONSTRAINTS.autoGainControl).toBe(true);
-    expect("autoGainControl" in micConstraints(false)).toBe(false);
+    // Off is truly off: no echo cancellation, noise suppression or auto gain.
+    expect(micConstraints(false)).toEqual({
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: 1,
+    });
   });
 
   it("keeps what the browser applied to the mic track", () => {

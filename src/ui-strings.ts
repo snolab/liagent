@@ -16,6 +16,17 @@ export type UiStrings = {
   items: string;
   /** The mark on a voice line the agent polished (its tooltip and label). */
   polished: string;
+  /** The + button (its label and tooltip), and the menu's name. */
+  attachOpen: string;
+  /** The × on what is attached to the next line. */
+  attachRemove: string;
+  /** The accessible name of the attached selection's quote. */
+  attachQuoted: string;
+  /** A file attached (its accessible prefix). */
+  attachFile: string;
+  /** Echo cancellation in the menu, when a mic is in the box. */
+  echoOn: string;
+  echoOff: string;
 };
 
 export const UI_EN: UiStrings = {
@@ -28,6 +39,12 @@ export const UI_EN: UiStrings = {
   needsYou: "needs you",
   items: "items",
   polished: "Polished",
+  attachOpen: "Add or attach",
+  attachRemove: "Remove the attachment",
+  attachQuoted: "Quoted from the page",
+  attachFile: "File",
+  echoOn: "Echo cancellation on",
+  echoOff: "Echo cancellation off",
 };
 
 export const UI_ZH: UiStrings = {
@@ -40,6 +57,12 @@ export const UI_ZH: UiStrings = {
   needsYou: "等你处理",
   items: "项",
   polished: "已润色",
+  attachOpen: "添加或附加",
+  attachRemove: "移除附件",
+  attachQuoted: "引用自页面",
+  attachFile: "文件",
+  echoOn: "回声消除：开",
+  echoOff: "回声消除：关",
 };
 
 /** The tree's strings in Chinese (tree.ts TreeStrings). */

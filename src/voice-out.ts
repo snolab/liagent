@@ -8,9 +8,10 @@
  *   audio, so the browser's echo canceller has it as its reference, and the
  *   gain ducks it; iOS ignores `element.volume`). "cloud" needs a TTS URL
  *   from the host (`voice({ tts })`); without one it is "speech".
- * - `liagent:voice-aec` (default on) opens the mic with echoCancellation,
- *   noiseSuppression and autoGainControl and keeps it open while the agent
- *   speaks. "0": capture is held while the agent speaks instead.
+ * - `liagent:voice-aec` (default on, src/aec.ts) opens the mic with
+ *   echoCancellation, noiseSuppression and autoGainControl and keeps it open
+ *   while the agent speaks. "0": no processing at all, and capture is held
+ *   while the agent speaks (and while the page plays, src/page-audio.ts).
  *
  * createCloudOut takes its browser pieces injected (fetch, the element, the
  * AudioContext), so it is tested with fakes in test/voice-out.test.ts.
@@ -22,6 +23,7 @@ import type { CloudOut, PlayEvents, Playback } from "./voice.ts";
 export {
   AEC_CONSTRAINTS,
   LEGACY_CONSTRAINTS,
+  RAW_CONSTRAINTS,
   appliedSettings,
   audioCtx,
   existingCtx,
@@ -30,7 +32,8 @@ export {
 } from "./mic-audio.ts";
 
 export const VOICE_OUT_KEY = "liagent:voice-out";
-export const VOICE_AEC_KEY = "liagent:voice-aec";
+export { AEC_EVENT, VOICE_AEC_KEY, aecOn, applyAec, setAec } from "./aec.ts";
+export { PAGE_AUDIO_TAIL_MS, type PageAudio, createPageAudio, pageAudio } from "./page-audio.ts";
 export type OutMode = "speech" | "cloud";
 
 /** A clip resumed after an interruption starts this much before where it stopped. */
@@ -48,8 +51,6 @@ const read = (k: string): string | null => {
 };
 /** The output asked for on this device: "cloud" only when set so. */
 export const outMode = (): OutMode => (read(VOICE_OUT_KEY) === "cloud" ? "cloud" : "speech");
-/** Echo-cancelled barge-in (default on; "0" = capture held while the agent speaks). */
-export const aecOn = (): boolean => read(VOICE_AEC_KEY) !== "0";
 
 /** The slice of an HTMLAudioElement the cloud output uses. */
 export type ElementLike = {

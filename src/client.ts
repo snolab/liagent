@@ -244,6 +244,7 @@ export function connectHub(box: ChatBox, opts: HubOptions): HubConnection {
       text,
       ...(to ? { to } : {}),
       ...(opts?.source ? { source: opts.source } : {}),
+      ...(opts?.context ? { context: opts.context } : {}),
     });
   box.onAnswer = (type, p, answer) =>
     void send(
