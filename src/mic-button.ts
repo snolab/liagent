@@ -144,7 +144,10 @@ export type MicStrings = MicErrorStrings & {
   speaking: string;
   recording: string;
   listening: string;
-  rec: string;
+  /** Said by the live region (for screen readers) when listening starts. */
+  liveListening: string;
+  /** Said by the live region when the agent starts speaking. */
+  liveSpeaking: string;
   noStt: string;
 };
 export const MIC_STRINGS_EN: MicStrings = {
@@ -154,7 +157,8 @@ export const MIC_STRINGS_EN: MicStrings = {
   speaking: "Agent speaking; tap to interrupt and talk",
   recording: "Recording; tap to stop listening",
   listening: "Listening; tap to stop",
-  rec: "REC",
+  liveListening: "Listening",
+  liveSpeaking: "Agent speaking",
   noStt: "No STT endpoint: set stt-url",
 };
 
@@ -167,6 +171,16 @@ export function micLabel(
   if (v.state === "off") return v.resume ? t.resume : t.dictate;
   if (status === "speaking") return t.speaking;
   return v.state === "capturing" ? t.recording : t.listening;
+}
+
+/** What the live region says: the coarse state only, so capture starting and stopping per utterance stays quiet. */
+export function micLive(
+  v: Pick<MicView, "state">,
+  status: MicStatus,
+  t: MicStrings = MIC_STRINGS_EN,
+): string {
+  if (v.state === "off" || v.state === "loading") return "";
+  return status === "speaking" ? t.liveSpeaking : t.liveListening;
 }
 
 class NoStt extends Error {
@@ -257,20 +271,28 @@ button:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
 button[data-state="loading"] { opacity: 0.5; }
 button[data-state="listening"], button[data-state="capturing"] { color: var(--rec); }
 button[data-state="listening"]::before { box-shadow: 0 0 0 2px color-mix(in oklch, var(--rec) 35%, transparent); }
-button[data-state="capturing"]::before { box-shadow: 0 0 0 2px var(--rec); animation: pulse 1.2s ease-in-out infinite; }
+/* Capturing: the ring pulses, opacity and a slight scale about its own centre (GPU only, concentric, no layout shift). */
+button[data-state="capturing"]::before { box-shadow: 0 0 0 2px var(--rec); animation: rec-pulse 1.2s ease-in-out infinite; }
 button[data-status="speaking"] { color: var(--talk); }
 button[data-status="speaking"]::before { box-shadow: 0 0 0 2px var(--talk); animation: pulse 2.4s ease-in-out infinite; }
 button[data-resume]::before { border: 2px dashed var(--rec); }
 svg { width: 1em; height: 1em; fill: currentColor; }
-.rec { font-size: 8px; font-weight: 700; color: var(--rec); }
-.rec[hidden] { display: none; }
+.live {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
 .note {
   position: absolute; inset-inline-end: 0; bottom: 100%; margin-bottom: 8px;
   white-space: nowrap; font-size: 10px; pointer-events: none; color: oklch(0.6 0.17 45);
 }
 .note:empty { display: none; }
 @keyframes pulse { 50% { opacity: 0.35; } }
-@media (prefers-reduced-motion: reduce) { button::before { animation: none !important; } }
+@keyframes rec-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.12); } }
+/* Reduced motion: no pulse; capturing is a steady, thicker ring instead. */
+@media (prefers-reduced-motion: reduce) {
+  button::before { animation: none !important; }
+  button[data-state="capturing"]::before { box-shadow: 0 0 0 3px var(--rec); }
+}
 `;
 
 const Base: typeof HTMLElement =
@@ -294,7 +316,7 @@ export class MicElement extends Base {
   private shadow?: ShadowRoot;
   private btn?: HTMLButtonElement;
   private path?: SVGPathElement;
-  private recEl?: HTMLSpanElement;
+  private liveEl?: HTMLSpanElement;
   private noteEl?: HTMLSpanElement;
   private off: (() => void)[] = [];
   /** Works out the page-audio hold again (src/page-audio.ts), while connected. */
@@ -529,10 +551,13 @@ export class MicElement extends Base {
     svg.setAttribute("aria-hidden", "true");
     const path = (this.path = document.createElementNS(SVG, "path"));
     svg.append(path);
-    const rec = (this.recEl = document.createElement("span"));
-    rec.className = "rec";
-    rec.setAttribute("aria-hidden", "true");
-    btn.append(svg, rec);
+    // No text on the button: the ring shows the state. A polite live region
+    // says it for screen readers, once per change (not per utterance).
+    const live = (this.liveEl = document.createElement("span"));
+    live.className = "live";
+    live.setAttribute("role", "status");
+    live.setAttribute("aria-live", "polite");
+    btn.append(svg);
     // Keeps the input's focus: the box stays open while dictating.
     btn.addEventListener("pointerdown", (e) => e.preventDefault());
     btn.addEventListener("click", () => {
@@ -544,12 +569,12 @@ export class MicElement extends Base {
         return s.voice()?.interrupt?.("tap");
       this.toggle();
     });
-    root.append(note, btn);
+    root.append(note, btn, live);
   }
 
   private render(v: MicView) {
     const btn = this.btn;
-    if (!btn || !this.path || !this.recEl || !this.noteEl) return;
+    if (!btn || !this.path || !this.liveEl || !this.noteEl) return;
     const t = this.t;
     const status = micStatus(v.state, v.pending, v.speaking);
     btn.dataset.state = v.state;
@@ -559,8 +584,7 @@ export class MicElement extends Base {
     btn.setAttribute("aria-label", micLabel(v, status, t));
     btn.title = micLabel(v, status, t);
     this.path.setAttribute("d", v.state === "off" ? MIC_PATH.regular : MIC_PATH.fill);
-    this.recEl.textContent = t.rec;
-    this.recEl.hidden = v.state !== "capturing";
+    this.liveEl.textContent = micLive(v, status, t);
     const note = v.error ? (v.error instanceof NoStt ? t.noStt : micErrorNote(v.error, t)) : "";
     this.noteEl.textContent = note;
     if (v.error && v.error !== this.last.error) this.fire("mic-error", { error: v.error, note });

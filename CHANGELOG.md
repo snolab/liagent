@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **No text on the mic.** The "REC" under the icon while capturing is gone:
+  the ring shows the state, and while capturing it pulses (opacity and a
+  slight scale about its own centre, so it stays concentric). Under
+  `prefers-reduced-motion` it holds still, 3px instead of 2px. A polite live
+  region says Listening / Agent speaking for screen readers (`micLive`).
+  `MicStrings.rec` is removed; `liveListening` and `liveSpeaking` are new.
+
 - **One frame while typing.** While the typing glass is up it is the frame,
   so the bar's own box is no longer drawn inside it: its border turns
   transparent (the width stays, so nothing moves), its tint and blur go, and

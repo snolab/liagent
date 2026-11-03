@@ -7,6 +7,7 @@ import {
   dictate,
   isDictationTarget,
   micLabel,
+  micLive,
 } from "../src/mic-button.ts";
 import {
   AEC_CONSTRAINTS,
@@ -100,6 +101,19 @@ describe("micLabel", () => {
         listening: "正在听",
       }),
     ).toBe("正在听");
+  });
+});
+
+describe("micLive", () => {
+  it("says the coarse state only: the same while listening and capturing", () => {
+    expect(micLive({ state: "off" }, "idle")).toBe("");
+    expect(micLive({ state: "loading" }, "loading")).toBe("");
+    expect(micLive({ state: "listening" }, "listening")).toBe(MIC_STRINGS_EN.liveListening);
+    expect(micLive({ state: "capturing" }, "capturing")).toBe(MIC_STRINGS_EN.liveListening);
+    expect(micLive({ state: "listening" }, "speaking")).toBe(MIC_STRINGS_EN.liveSpeaking);
+  });
+  it("puts no text on the button", () => {
+    expect(Object.values(MIC_STRINGS_EN)).not.toContain("REC");
   });
 });
 

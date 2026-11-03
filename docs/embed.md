@@ -859,8 +859,10 @@ can start. Otherwise the button shows a dashed ring and "Tap to resume
 listening". Either way it fires `mic-resume`.
 
 **Privacy.** Audio goes only to the endpoint you configure, one utterance at
-a time. Nothing is recorded while the mic is off. The button shows a red
-ring and REC while it captures.
+a time. Nothing is recorded while the mic is off. The button's red ring
+pulses while it captures (steady and thicker under reduced motion); the
+button carries no text, and a polite live region says the state for screen
+readers.
 
 ## 9. Hands-free voice
 
