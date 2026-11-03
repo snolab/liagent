@@ -323,11 +323,12 @@ export function createMicSession<C = unknown>(
      * during a reopen run one more pass instead of overlapping.
      */
     reopen(): Promise<boolean> {
-      if (mic.state() === "off") return Promise.resolve(false);
+      // Checked first: a reopen in flight passes through "off" itself.
       if (reopening) {
         reopenAgain = true;
         return reopening;
       }
+      if (mic.state() === "off") return Promise.resolve(false);
       const epoch = offs;
       reopening = (async () => {
         do {

@@ -184,7 +184,7 @@ export type SelectionDeps = {
 export function readSelection(d: Pick<SelectionDeps, "doc" | "inChat" | "fence">): string | null {
   const a = d.doc.activeElement;
   if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA") && !d.inChat(a)) {
-    if (isSensitive(a)) return null;
+    if (isSensitive(a) || (d.fence && a.closest?.(d.fence))) return null;
     const s = a.selectionStart ?? 0;
     const e = a.selectionEnd ?? 0;
     if (e > s) return (a.value ?? "").slice(s, e);
@@ -192,7 +192,8 @@ export function readSelection(d: Pick<SelectionDeps, "doc" | "inChat" | "fence">
   const sel = d.doc.getSelection();
   if (!sel || !sel.rangeCount || sel.isCollapsed) return "";
   if (d.inChat(sel.anchorNode) || d.inChat(sel.focusNode)) return null;
-  if (isSensitive(elementOf(sel.anchorNode)) || isSensitive(elementOf(sel.focusNode))) return null;
+  const ends = [elementOf(sel.anchorNode), elementOf(sel.focusNode)];
+  if (ends.some((e) => isSensitive(e) || (d.fence && e?.closest?.(d.fence)))) return null;
   // Nor anything it spans: a selection from before a fenced part to after it
   // would carry that part's text in toString().
   const fences = [SENSITIVE, CHAT_FENCE, d.fence].filter(Boolean).join(", ");

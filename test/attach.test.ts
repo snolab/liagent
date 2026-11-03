@@ -132,6 +132,23 @@ describe("page selection", () => {
     });
     expect(readSelection({ doc, inChat })).toBeNull();
   });
+  it("a host's own fence covers fields and selections too", () => {
+    const { doc, state } = fakeDoc();
+    const priv = (o: Partial<FakeEl>) =>
+      el({ ...o, closest: (sel: string) => (sel.includes(".private") ? {} : null) });
+    state.active = priv({
+      tagName: "TEXTAREA",
+      value: "secret",
+      selectionStart: 0,
+      selectionEnd: 6,
+    });
+    expect(readSelection({ doc, inChat, fence: ".private" })).toBeNull();
+    state.active = null;
+    state.text = "secret";
+    state.anchor = priv({});
+    expect(readSelection({ doc, inChat, fence: ".private" })).toBeNull();
+    expect(readSelection({ doc, inChat })).toBe("secret");
+  });
   it("a selection in the chat, or one crossing a fenced part, is left alone", () => {
     const { doc, state } = fakeDoc();
     state.text = "inside";

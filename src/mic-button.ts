@@ -297,6 +297,8 @@ export class MicElement extends Base {
   private recEl?: HTMLSpanElement;
   private noteEl?: HTMLSpanElement;
   private off: (() => void)[] = [];
+  /** Works out the page-audio hold again (src/page-audio.ts), while connected. */
+  private holdForPage?: () => void;
   private last: { state?: MicState; status?: MicStatus; active?: boolean; error?: unknown } = {};
   private lastResume?: ResumeOutcome;
 
@@ -396,7 +398,10 @@ export class MicElement extends Base {
 
   attributeChangedCallback(name?: string) {
     this._session?.configure(this.config());
-    if (name === "aec") void this._session?.reopen?.();
+    if (name === "aec") {
+      this.holdForPage?.();
+      void this._session?.reopen?.();
+    }
   }
 
   connectedCallback() {
@@ -427,7 +432,9 @@ export class MicElement extends Base {
     const audio = pageAudio();
     const holdForPage = () =>
       (s as { setPageHold?: (on: boolean) => void }).setPageHold?.(!this.aec && audio.playing());
+    this.holdForPage = holdForPage;
     holdForPage();
+    this.off.push(() => (this.holdForPage = undefined));
     this.off.push(audio.subscribe(holdForPage));
     const esc = (e: KeyboardEvent) => {
       if (e.key === "Escape" && s.view().state !== "off") void s.off();

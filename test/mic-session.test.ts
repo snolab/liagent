@@ -441,3 +441,17 @@ describe("mic session: reopen and the page's hold", () => {
     expect(holds).toEqual([true, false]);
   });
 });
+
+describe("mic session: overlapping reopens", () => {
+  it("a reopen asked during another runs one more pass instead of being dropped", async () => {
+    const f = fakes();
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    const a = s.reopen();
+    const b = s.reopen();
+    expect(await a).toBe(true);
+    expect(await b).toBe(true);
+    expect(f.calls.gum).toBe(3); // the first open, then two passes
+    expect(s.view().state).toBe("listening");
+  });
+});
