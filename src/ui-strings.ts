@@ -16,6 +16,8 @@ export type UiStrings = {
   items: string;
   /** The mark on a voice line the agent polished (its tooltip and label). */
   polished: string;
+  /** The "+" that attaches files (with box.onAttach set). */
+  attach: string;
 };
 
 export const UI_EN: UiStrings = {
@@ -28,6 +30,7 @@ export const UI_EN: UiStrings = {
   needsYou: "needs you",
   items: "items",
   polished: "Polished",
+  attach: "Attach files",
 };
 
 export const UI_ZH: UiStrings = {
@@ -40,6 +43,7 @@ export const UI_ZH: UiStrings = {
   needsYou: "等你处理",
   items: "项",
   polished: "已润色",
+  attach: "添加文件",
 };
 
 /** The tree's strings in Chinese (tree.ts TreeStrings). */

@@ -49,19 +49,23 @@ the state tree (`treeSource`) and drags sideways through its levels. Minimized,
 new lines float over the bar and the tree's frontier (✓ done, ▶ in progress,
 › next) sits under them. A wheel, trackpad or touch scroll over the input
 scrolls the log; text that overflows the input scrolls first, then hands the
-rest of the gesture on to the log.
+rest of the gesture on to the log. With `onAttach` set, a `+` after the
+input opens the file picker, and files dropped on the bar or pasted into the
+input go the same way: the box hands them to you and never uploads anything.
 
 Properties: `messages`, `live`, `listeners`, `sessions`, `pending`, `evalRan`,
 `busy`, `guest`, `notice`, `warning`, `defaultOpen`, `placeholder`,
-`treeSource`, `strings`, `voice`, `voicePrefer`, `micActive`, and the avatars: `agentAvatar`
+`treeSource`, `strings`, `voice`, `voicePrefer`, `micActive`, `attachAccept`, and the avatars: `agentAvatar`
 (set it to your app's logo), `userAvatar`, `userName`, `userId`.
 Callbacks: `onSend(text, to?, { source? }) → boolean`, `onAnswer(type, pair, scope?)`, `onEnd(pair)`,
-`avatarFor(message)` (a per-sender avatar).
+`avatarFor(message)` (a per-sender avatar), `onAttach(files) → void | string` (a
+string is shown as a note; the `liagent-attach` event fires first, and
+`preventDefault()` there skips it).
 Voice input plugs in as a child with `slot="mic"` (it lands at the bar's right
 end) and drives `draft`, `setDraft(text, { source: "stt" })`, `setPartial(text)`,
 `submit()` and `micActive`; see [docs/embed.md](docs/embed.md#voice-input-and-output).
 Attributes: `storage-key` (localStorage prefix, default `liagent`), `collapsed`,
-`placeholder`, `agent-avatar`, `user-avatar`, `user-name`, `mic-active`. Theme: `--liagent-bg`
+`placeholder`, `agent-avatar`, `user-avatar`, `user-name`, `mic-active`, `attach-accept`. Theme: `--liagent-bg`
 (set it to your page colour), `--liagent-fg`, `--liagent-agent`, `--liagent-z`,
 `--liagent-width`, `--liagent-avatar`.
 

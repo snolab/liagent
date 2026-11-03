@@ -11,14 +11,14 @@
 // Or let src/client.ts drive it from a hub: connectHub(box, url).
 //
 // What it does:
-//   - One bar, glass over the page: [mark | tree | input … | mic]. No title
+//   - One bar, glass over the page: [mark | tree | input … | + | mic]. No title
 //     bar. The mark (its dot is the connection): a tap minimizes or restores
 //     the box, a double tap opens the menu, a drag moves the box anywhere
 //     (kept on screen and remembered). The bar's own edge drags too.
 //     Minimized, the input's slot closes (a grid column, 1fr ⇄ 0fr, 180 ms;
 //     at once under reduced motion) and leaves [mark | tree | mic]; the input
 //     is inert and hidden from screen readers then. Targets are 40px; the tab
-//     order is mark → tree → input → mic.
+//     order is mark → tree → input → attach → mic.
 //   - The input is one line at rest (16px, so iOS never zooms), grows to five
 //     lines and then scrolls; it is measured again when its width changes.
 //   - One panel at a time: the menu (status, read-aloud and its speed 1× to
@@ -73,6 +73,15 @@
 //   - Quiet lines (src/speak-rules.ts): a line with `quiet: true` is never
 //     read; a hidden page never speaks, and hiding it stops the reading. A
 //     line kept silent fires `liagent-silent` {id, why}.
+//   - Attaching files (src/attach.ts): with `onAttach` set, a "+" sits after
+//     the input (hidden while minimized). It opens the file picker (multiple;
+//     `attachAccept` or the attach-accept attribute, e.g. "image/*,.pdf",
+//     limits the types; default any). Files dropped on the bar or pasted into
+//     the input go the same way. `liagent-attach` {files} fires first
+//     (bubbling, composed, cancelable: preventDefault() skips onAttach); then
+//     `onAttach(files)` runs, and a string it returns shows as the warning
+//     line. Unset, there is no button and drops and pastes stay native. The
+//     box never uploads anything itself.
 //   - Strings: Chinese on a zh page (src/ui-strings.ts); `strings` and
 //     `treeStrings` override them.
 //   - Text only: nothing a message holds is ever parsed as HTML.
@@ -157,6 +166,7 @@ import { createAxisLock, createDragFlag, createLongPress, createTapper } from ".
 import { type VoicePreference, createVoicePicker, readingLang, watchVoices } from "./voice-pick.ts";
 import { createSwipeHandoff, splitScroll, wheelPixels } from "./scroll-handoff.ts";
 import { type UiStrings, treeDefaults, uiStrings } from "./ui-strings.ts";
+import { type AttachHandler, attachFiles, filesOf, hasFiles } from "./attach.ts";
 import { RETIRED_SETTINGS, type SpeakMeta, pageHidden, silenceFor } from "./speak-rules.ts";
 import type { Assignee } from "./state-tree.ts";
 
@@ -171,6 +181,7 @@ export {
 } from "./avatar.ts";
 
 export type { VoicePreference } from "./voice-pick.ts";
+export type { AttachHandler } from "./attach.ts";
 export type { Silence, SpeakMeta } from "./speak-rules.ts";
 
 export type AnswerType = "allow" | "deny";
@@ -275,6 +286,8 @@ const ICONS = {
   speaker: `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M2 6h3l4-3v10l-4-3H2z"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.5 3.5a6 6 0 0 1 0 9" stroke="currentColor" fill="none" stroke-width="1.3"/></svg>`,
   /** The liagent mark: a speech bubble holding an "l", a spark at its top right. */
   mark: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h10a4 4 0 0 1 4 4v7a4 4 0 0 1-4 4h-7l-5 3v-3.6A4 4 0 0 1 3 14V7a4 4 0 0 1 4-4Z"/><path d="M10.5 6.5v8"/><path d="M15.5 5.6l.55 1.35 1.35.55-1.35.55-.55 1.35-.55-1.35-1.35-.55 1.35-.55Z" fill="oklch(0.72 0.17 150)" stroke="oklch(0.72 0.17 150)" stroke-width="1"/></svg>`,
+  /** A plus: the attach button. */
+  plus: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`,
   /** An outline tree (a root and two branches): the tree button. */
   tree: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="10" width="7" height="4.5" rx="1.5"/><rect x="14" y="16.5" width="7" height="4.5" rx="1.5"/><path d="M6.5 8v10.75H14M6.5 12.25H14"/></svg>`,
 };
@@ -413,6 +426,9 @@ textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent
 }
 @keyframes rot { to { transform: rotate(360deg); } }
 .mic { pointer-events: auto; flex: none; display: flex; align-items: center; min-height: 32px; }
+.attach { color: var(--muted); }
+.attach:hover, .attach:focus-visible { color: inherit; }
+.bar.drop { border-color: currentColor; }
 .unread {
   pointer-events: none; position: absolute; top: -6px; inset-inline-end: -6px; border-radius: 999px; padding: 0 4px;
   font-size: 10px; line-height: 16px; color: oklch(1 0 0); background: oklch(0.55 0.2 260);
@@ -513,6 +529,8 @@ type Els = Record<
   | "input"
   | "notice"
   | "spin"
+  | "attach"
+  | "file"
   | "mic"
   | "micslot"
   | "unread"
@@ -564,7 +582,13 @@ export class ChatBox extends Base {
    * give the same to `voice({ lang, prefer })` instead.
    */
   voicePrefer?: VoicePreference | null;
+  /**
+   * The file picker's `accept` for the "+" button ("image/*,.pdf"; unset:
+   * the attach-accept attribute, else any file).
+   */
+  attachAccept?: string | null;
 
+  private _onAttach: AttachHandler | null = null;
   private _messages: ChatMessage[] = [];
   private _live = false;
   private _listeners = 0;
@@ -835,6 +859,19 @@ export class ChatBox extends Base {
     this._user = { ...this._user, [k]: v };
     this.renderLog();
   }
+  /**
+   * Files the user attached (the "+" button, a drop on the bar, a paste):
+   * set it and the "+" shows. A string it returns (or resolves to) shows as
+   * the warning line. `liagent-attach` {files} fires first; preventDefault()
+   * there skips this. The box never uploads anything itself.
+   */
+  get onAttach(): AttachHandler | null {
+    return this._onAttach;
+  }
+  set onAttach(v: AttachHandler | null | undefined) {
+    this._onAttach = typeof v === "function" ? v : null;
+    this.renderAttach();
+  }
   set placeholder(v: string) {
     this._placeholder = v;
     this.renderPlaceholder();
@@ -1081,6 +1118,8 @@ export class ChatBox extends Base {
         <p class="notice" id="notice" role="status" hidden></p>
         <span class="spin" id="spin" role="status" hidden></span>
       </div>
+      <button type="button" class="tap attach" id="attach" hidden>${ICONS.plus}</button>
+      <input type="file" id="file" multiple hidden tabindex="-1" aria-hidden="true">
       <div class="mic" id="mic" hidden><slot name="mic" id="micslot"></slot></div>
       <span class="unread" id="unread" hidden></span>
     </div>
@@ -1158,6 +1197,8 @@ export class ChatBox extends Base {
     });
     this.els.mic!.hidden = !micslot.assignedElements().length;
 
+    this.attachInputs(bar, ta);
+
     if (typeof ResizeObserver !== "undefined") {
       let width = ta.clientWidth;
       this.ro = new ResizeObserver((entries) => {
@@ -1231,6 +1272,52 @@ export class ChatBox extends Base {
       this.submit();
     });
     this.swipeScrollsLog(ta);
+  }
+
+  /**
+   * The "+" opens the file picker; files dropped on the bar or pasted into
+   * the input go the same way (src/attach.ts). Only with `onAttach` set:
+   * otherwise drops and pastes are left to the browser, and so is any text.
+   */
+  private attachInputs(bar: HTMLElement, ta: HTMLTextAreaElement) {
+    const file = this.els.file as HTMLInputElement;
+    const takes = (dt: DataTransfer | null) => !!this._onAttach && !this._notice && hasFiles(dt);
+    this.els.attach!.addEventListener("click", () => {
+      if (!this._onAttach) return;
+      file.accept = this.attachAccept ?? this.getAttribute("attach-accept") ?? "";
+      file.click();
+    });
+    file.addEventListener("change", () => {
+      const files = filesOf(file);
+      file.value = ""; // the same file picked again fires again
+      this.attach(files);
+    });
+    bar.addEventListener("dragover", (e) => {
+      if (!takes(e.dataTransfer)) return;
+      e.preventDefault();
+      e.dataTransfer!.dropEffect = "copy";
+      bar.classList.add("drop");
+    });
+    bar.addEventListener("dragleave", (e) => {
+      if (!bar.contains(e.relatedTarget as Node | null)) bar.classList.remove("drop");
+    });
+    bar.addEventListener("drop", (e) => {
+      bar.classList.remove("drop");
+      if (!takes(e.dataTransfer)) return;
+      e.preventDefault();
+      this.attach(filesOf(e.dataTransfer));
+    });
+    // A paste with files (a copied picture or file) attaches them; text pastes as usual.
+    ta.addEventListener("paste", (e) => {
+      const files = filesOf(e.clipboardData);
+      if (!files.length || !takes(e.clipboardData)) return;
+      e.preventDefault();
+      this.attach(files);
+    });
+  }
+  private async attach(files: File[]) {
+    const note = await attachFiles(this, files, this._onAttach);
+    if (note !== undefined) this.warning = note;
   }
 
   /**
@@ -1762,6 +1849,7 @@ export class ChatBox extends Base {
     mark.setAttribute("aria-expanded", String(this.open));
     treebtn.setAttribute("aria-expanded", String(this.panel === "tree"));
     treebtn.setAttribute("aria-label", ui.stateTree);
+    this.renderAttach();
     tree.setAttribute("aria-label", ui.stateTree);
     tclose.setAttribute("aria-label", ui.closeTree);
     // The tree: heading the column (expanded), or the float box (minimized).
@@ -2231,7 +2319,17 @@ export class ChatBox extends Base {
     notice.hidden = !this._notice;
     notice.textContent = this._notice;
     this.els.input!.hidden = !!this._notice;
+    this.renderAttach();
     this.renderStatus();
+  }
+
+  /** The "+" shows with `onAttach` set, the box open and the input there. */
+  private renderAttach() {
+    if (!this.root) return;
+    const b = this.els.attach!;
+    b.hidden = !this._onAttach || !this.open || !!this._notice;
+    b.setAttribute("aria-label", this.ui.attach);
+    b.title = this.ui.attach;
   }
 
   private renderMenu() {

@@ -12,6 +12,7 @@
 //   tap-gesture    single/double tap, drag flag, axis lock, long press
 //   scroll-handoff a scroll over the input split between it and the log
 //   ui-strings     the box's and the tree's strings in Chinese
+//   attach         files handed to the host: the liagent-attach event, then onAttach
 
 export * from "./tree-nav.ts";
 export * from "./detent.ts";
@@ -24,3 +25,4 @@ export * from "./speak-rules.ts";
 export * from "./tap-gesture.ts";
 export * from "./scroll-handoff.ts";
 export * from "./ui-strings.ts";
+export * from "./attach.ts";

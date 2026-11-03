@@ -370,7 +370,9 @@ effect.
   message (its `quiet`), checked first, with the page's visibility.
 
 **Events:** `liagent-silent`, `detail: { id, why }`, when a live line is
-kept silent (`why`: `"hidden"` or `"quiet"`).
+kept silent (`why`: `"hidden"` or `"quiet"`). `liagent-attach`,
+`detail: { files }` (bubbling, composed, cancelable), when the user attaches
+files; `preventDefault()` skips `onAttach`.
 
 - `submit() → boolean`: sends the draft now, as Enter would; true if it went
   out.
@@ -400,6 +402,16 @@ kept silent (`why`: `"hidden"` or `"quiet"`).
   line that is not the agent's. Its pictures are tried first, then the
   line's own `sender` (a hub may set one on each message), then, on the
   user's own lines, `userAvatar`.
+- `onAttach(files: File[]) → void | string | Promise<void | string>`: files
+  the user attached, from the `+` button (shown only while `onAttach` is
+  set), a drop on the bar, or a paste of files into the input. Upload them
+  however you like: the box never uploads anything. A string it returns (or
+  resolves to), or a thrown error's message, is shown as the warning line
+  ("Uploaded 3 files"). `liagent-attach` fires first; a listener that calls
+  `preventDefault()` takes the files instead. Without `onAttach` there is no
+  button, and drops and pastes are left to the browser. The picker takes any
+  file unless `attachAccept` (property) or `attach-accept` (attribute) says
+  otherwise, e.g. `"image/*,.pdf"`.
 
 **Avatars:** every line starts with an avatar (18px; `--liagent-avatar`).
 Pictures load with `referrerPolicy="no-referrer"` (Google's need it) and
@@ -419,6 +431,7 @@ name from a visually hidden span instead.
 - `agent-avatar`, `user-avatar`, `user-name`: the same as the properties
   (read once, when attached).
 - `mic-active`: the same as `micActive` (watched).
+- `attach-accept`: the same as `attachAccept` (read on each tap of `+`).
 
 **Theming** (CSS custom properties on the element):
 
@@ -431,7 +444,8 @@ name from a visually hidden span instead.
 | `--liagent-z`      | `40`                       | z-index                                                                        |
 | `--liagent-width`  | `min(20rem, 100vw - 1rem)` | Box width                                                                      |
 
-**Layout:** one glass bar, `[mark | tree | input … | mic]`.
+**Layout:** one glass bar, `[mark | tree | input … | + | mic]` (the `+` only
+with `onAttach` set).
 
 - **Mark** (its dot: green with an agent listening, amber connected without
   one, grey offline): a tap minimizes or restores, a double tap opens the menu
