@@ -215,6 +215,9 @@ export type SelectionMemory = ReturnType<typeof createSelectionMemory>;
  */
 export function createSelectionMemory(d: SelectionDeps) {
   const now = d.now ?? Date.now;
+  // Fences only add up: every caller's private parts stay fenced.
+  const fences = new Set<string>(d.fence ? [d.fence] : []);
+  const read = () => readSelection({ ...d, fence: [...fences].join(", ") || undefined });
   let kept: PageSelection | null = null;
   let downInChat = false;
   const subs = new Set<() => void>();
@@ -227,7 +230,7 @@ export function createSelectionMemory(d: SelectionDeps) {
     downInChat = d.inChat(e.target);
   };
   const onChange = () => {
-    const text = readSelection(d);
+    const text = read();
     if (text === null) return;
     const trimmed = text.trim();
     if (trimmed) {
@@ -254,6 +257,13 @@ export function createSelectionMemory(d: SelectionDeps) {
       return kept && now() - kept.at <= SELECTION_TTL_MS ? kept : null;
     },
     clear: () => set(null),
+    /** Fence more of the page (selectors whose text is never attached); never removed. */
+    addFence(selector: string | undefined) {
+      if (!selector || fences.has(selector)) return;
+      fences.add(selector);
+      // What is kept may sit in the newly fenced part: let it go.
+      if (kept) set(null);
+    },
     subscribe(f: () => void) {
       subs.add(f);
       return () => void subs.delete(f);
@@ -280,7 +290,8 @@ function domInChat(node: unknown): boolean {
 const MEMORY_KEY = "__liagentSelection";
 /**
  * The page's selection memory, made and started once (every copy of the
- * module shares it, on globalThis). Null where there is no DOM.
+ * module shares it, on globalThis). Null where there is no DOM. Each
+ * caller's `fence` is added to it; `host` is the first caller's.
  */
 export function pageSelection(
   opts: { host?: boolean; fence?: string } = {},
@@ -288,7 +299,11 @@ export function pageSelection(
   if (typeof document === "undefined") return null;
   const g = globalThis as unknown as Record<string, SelectionMemory | undefined>;
   const have = g[MEMORY_KEY];
-  if (have) return have;
+  if (have) {
+    // Made by another caller: its fences stay, this caller's are added.
+    have.addFence?.(opts.fence);
+    return have;
+  }
   const m = createSelectionMemory({
     doc: document as unknown as SelectionDoc,
     inChat: domInChat,
@@ -323,8 +338,9 @@ export type SelectionActionOptions = {
 /** "Attach the selection": the page's last selection outside the box, as context. */
 export function selectionAction(o: SelectionActionOptions = {}): ChatAction {
   const mem = () => (o.memory !== undefined ? o.memory : pageSelection(o));
-  // Start listening now, so a selection made before the menu opens is known.
-  mem();
+  // Start listening now, so a selection made before the menu opens is known;
+  // a memory made elsewhere takes this action's fence too.
+  mem()?.addFence(o.fence);
   return {
     id: o.id ?? "selection",
     label: o.label ?? "Attach the selection",

@@ -149,6 +149,18 @@ describe("page selection", () => {
     expect(readSelection({ doc, inChat, fence: ".private" })).toBeNull();
     expect(readSelection({ doc, inChat })).toBe("secret");
   });
+  it("a fence added later (another caller's) applies too, and drops what was kept", () => {
+    const { doc, state } = fakeDoc();
+    const memory = createSelectionMemory({ doc, inChat, where: () => ({}) });
+    state.text = "secret";
+    state.anchor = el({ closest: (sel: string) => (sel.includes(".private") ? {} : null) });
+    memory._events.onChange();
+    expect(memory.get()?.selection).toBe("secret");
+    selectionAction({ memory, fence: ".private" });
+    expect(memory.get()).toBeNull();
+    memory._events.onChange();
+    expect(memory.get()).toBeNull();
+  });
   it("a selection in the chat, or one crossing a fenced part, is left alone", () => {
     const { doc, state } = fakeDoc();
     state.text = "inside";
