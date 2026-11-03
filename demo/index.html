@@ -52,10 +52,27 @@
       </p>
     </main>
     <script type="module">
-      const { defineChatBox } = await import("./liagent.js");
+      const { defineChatBox, selectionAction, fileAction } = await import("./liagent.js");
       defineChatBox();
       const box = document.createElement("liagent-chat");
       document.body.append(box);
+      // The + menu: the page selection, and a file hook (the demo "uploads" to a fake path).
+      const params = new URLSearchParams(location.search);
+      box.actions = [
+        selectionAction({ group: "Attach to message" }),
+        fileAction({
+          group: "Attach to message",
+          upload: async (f) => ({
+            name: f.name,
+            url: `/uploads/${encodeURIComponent(f.name)}`,
+            type: f.type,
+            size: f.size,
+          }),
+        }),
+        { id: "hello", label: "Say hello", icon: "👋", onSelect: () => box.setDraft("hello") },
+      ];
+      if (params.get("mic")) box.micPlacement = params.get("mic");
+      if (params.get("tree")) box.treePlacement = params.get("tree");
       const now = Date.now();
       if (location.search.includes("hub")) {
         const { connectHub } = await import("./liagent.js");
@@ -86,7 +103,7 @@
         box.live = true;
         box.listeners = 1;
         let n = 0;
-        box.onSend = (text) => {
+        box.onSend = (text, _to, opts) => {
           if (!box.live) return false;
           const k = ++n;
           box.push({
@@ -95,6 +112,7 @@
             label: "",
             text,
             at: Date.now(),
+            ...(opts?.context ? { context: opts.context } : {}),
           });
           box.busy = true;
           setTimeout(() => {

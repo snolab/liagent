@@ -112,10 +112,14 @@ describe("the element outside a browser", () => {
 });
 
 describe("mic-audio", () => {
-  it("AEC constraints: echo cancellation, noise suppression and auto gain on; off drops auto gain", () => {
+  it("AEC constraints: echo cancellation, noise suppression and auto gain on; off turns all three off", () => {
     expect(micConstraints()).toEqual({ ...AEC_CONSTRAINTS });
     expect(micConstraints(false)).toEqual({ ...LEGACY_CONSTRAINTS });
-    expect("autoGainControl" in micConstraints(false)).toBe(false);
+    expect(micConstraints(false)).toMatchObject({
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    });
   });
 
   it("keeps what the browser applied to the track, without device ids", () => {

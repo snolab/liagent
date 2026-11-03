@@ -26,7 +26,9 @@
 //   lang / lang           a language hint, sent as ?lang= (none: detected)
 //   vad-src, ort-src      vad-web's and onnxruntime-web's dist URLs (Silero VAD by <script>)
 //   storage-key           sessionStorage key of the reload flag (default "liagent:mic")
-//   aec                   "off": no echo-cancelled barge-in (capture held while the agent speaks)
+//   aec                   "off": no echo cancellation at all (capture held while the agent
+//                         speaks and while the page plays, src/page-audio.ts); unset: the
+//                         device's switch (src/aec.ts; applyAec reopens an open mic)
 //   tick                  a soft tick when a spoken sentence is sent (off by default)
 //   .stt                  (wav, info) => Promise<{text} | string>, instead of stt-url
 //   .sttHeaders, .sttCredentials   for the default STT request
@@ -40,8 +42,12 @@
 // mic-error {error, note}, mic-resume (a ResumeOutcome), mic-utterance
 // {wav, durationMs, text, echo} for each final utterance.
 //
-// Theming: --liagent-fg, --liagent-mic-rec (capturing; a red), --liagent-mic-talk
-// (the agent speaking; a blue).
+// Theming: --liagent-fg, --liagent-mic-fg (idle; muted text), --liagent-mic-bg
+// (its fill; none), --liagent-mic-icon (the glyph's size, 16px),
+// --liagent-mic-rec (capturing; a red), --liagent-mic-talk (the agent
+// speaking; a blue). Its size is --liagent-control (one line of the bar,
+// 2.125rem): in a <liagent-chat> the bar's corner radius is derived from it,
+// so the mic stays concentric with the corner at any size.
 
 import {
   type MicErrorStrings,
@@ -67,6 +73,8 @@ import {
   MIC_SESSION_KEY,
   micSession,
 } from "./mic-session.ts";
+import { AEC_EVENT, aecOn } from "./aec.ts";
+import { pageAudio } from "./page-audio.ts";
 import {
   type VadSource,
   audioCtx,
@@ -81,6 +89,8 @@ import {
 export * from "./mic.ts";
 export * from "./mic-session.ts";
 export * from "./mic-audio.ts";
+export { AEC_EVENT, VOICE_AEC_KEY, aecOn, applyAec, setAec } from "./aec.ts";
+export { type PageAudio, createPageAudio, pageAudio } from "./page-audio.ts";
 
 /**
  * What the mic types into: `<liagent-chat>` has this shape, and so can any
@@ -223,18 +233,25 @@ const CSS = `
   color: var(--liagent-fg, CanvasText);
   --rec: var(--liagent-mic-rec, oklch(0.6 0.22 25));
   --talk: var(--liagent-mic-talk, oklch(0.62 0.14 250));
+  /* One line of the bar: the mic is a circle this wide (src/box.ts, "Geometry"). */
+  --size: var(--liagent-control, 2.125rem);
 }
 :host([hidden]) { display: none; }
 button {
   all: unset; box-sizing: border-box; position: relative; cursor: pointer;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  width: 40px; height: 32px; border-radius: 999px; font-size: 16px; line-height: 1;
-  color: color-mix(in oklch, currentColor 55%, transparent); touch-action: none;
+  width: var(--size); height: var(--size); border-radius: 50%; font-size: var(--liagent-mic-icon, 16px); line-height: 1;
+  color: var(--liagent-mic-fg, color-mix(in oklch, currentColor 55%, transparent));
+  background: var(--liagent-mic-bg, transparent); touch-action: none;
   -webkit-tap-highlight-color: transparent;
 }
-button::after { content: ""; position: absolute; inset: -4px 0; }
+/* A 40px target whatever the drawn size. */
+button::after {
+  content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: max(100%, 40px); height: max(100%, 40px);
+}
 button::before {
-  content: ""; position: absolute; inset: 2px 6px; border-radius: 999px; pointer-events: none;
+  content: ""; position: absolute; inset: 2px; border-radius: 50%; pointer-events: none;
 }
 button:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
 button[data-state="loading"] { opacity: 0.5; }
@@ -280,6 +297,8 @@ export class MicElement extends Base {
   private recEl?: HTMLSpanElement;
   private noteEl?: HTMLSpanElement;
   private off: (() => void)[] = [];
+  /** Works out the page-audio hold again (src/page-audio.ts), while connected. */
+  private holdForPage?: () => void;
   private last: { state?: MicState; status?: MicStatus; active?: boolean; error?: unknown } = {};
   private lastResume?: ResumeOutcome;
 
@@ -309,7 +328,7 @@ export class MicElement extends Base {
     if (a === null) {
       // Unset: the device setting the voice output reads too.
       try {
-        return globalThis.localStorage?.getItem("liagent:voice-aec") !== "0";
+        return aecOn();
       } catch {
         return true;
       }
@@ -377,8 +396,12 @@ export class MicElement extends Base {
     };
   }
 
-  attributeChangedCallback() {
+  attributeChangedCallback(name?: string) {
     this._session?.configure(this.config());
+    if (name === "aec") {
+      this.holdForPage?.();
+      void this._session?.reopen?.();
+    }
   }
 
   connectedCallback() {
@@ -397,6 +420,22 @@ export class MicElement extends Base {
         onPending: (n, interim) => this.box?.setPartial(n > 0 && interim ? interim : null),
       }),
     );
+    // The echo cancellation switch (src/aec.ts applyAec): the session takes
+    // the new mode before applyAec reopens it.
+    const aecChanged = () => {
+      s.configure(this.config());
+      holdForPage();
+    };
+    globalThis.addEventListener?.(AEC_EVENT, aecChanged);
+    this.off.push(() => globalThis.removeEventListener?.(AEC_EVENT, aecChanged));
+    // The page's own audio (src/page-audio.ts) holds capture with echo cancellation off.
+    const audio = pageAudio();
+    const holdForPage = () =>
+      (s as { setPageHold?: (on: boolean) => void }).setPageHold?.(!this.aec && audio.playing());
+    this.holdForPage = holdForPage;
+    holdForPage();
+    this.off.push(() => (this.holdForPage = undefined));
+    this.off.push(audio.subscribe(holdForPage));
     const esc = (e: KeyboardEvent) => {
       if (e.key === "Escape" && s.view().state !== "off") void s.off();
     };

@@ -15,21 +15,8 @@
  */
 import { RATE, type Vad, type VadEvents, energyGate, resample } from "./mic.ts";
 
-/** The mic with echo cancellation on (the default: the user may talk over the agent). */
-export const AEC_CONSTRAINTS = {
-  echoCancellation: true,
-  noiseSuppression: true,
-  autoGainControl: true,
-  channelCount: 1,
-} as const;
-/** Echo cancellation's "off" mode: capture is held while the agent speaks; no auto gain. */
-export const LEGACY_CONSTRAINTS = {
-  echoCancellation: true,
-  noiseSuppression: true,
-  channelCount: 1,
-} as const;
-export const micConstraints = (aec = true): MediaTrackConstraints =>
-  aec ? { ...AEC_CONSTRAINTS } : { ...LEGACY_CONSTRAINTS };
+import { micConstraints } from "./aec.ts";
+export { AEC_CONSTRAINTS, LEGACY_CONSTRAINTS, RAW_CONSTRAINTS, micConstraints } from "./aec.ts";
 
 /** What the browser actually applied to the mic track (no device ids), for a host's debug log. */
 let applied: Record<string, unknown> | null = null;
