@@ -14,7 +14,7 @@ import { type TreeNode, watchTree } from "../src/tree.ts";
 
 type N7 = [TreeNode, TreeNode, TreeNode, TreeNode, TreeNode, TreeNode, TreeNode];
 
-// Mirrors snolab/lianki unit/state-tree.test.ts (the parser is the same file).
+// Parser tests for the state-tree node format.
 const opts = { repo: "acme/app" };
 
 describe("parseTree", () => {
