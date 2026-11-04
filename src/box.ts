@@ -86,6 +86,18 @@
 //     over the input (× drops it) and goes out as the line's `context`.
 //     The + shows when the menu has anything in it; its buttons keep the
 //     input's focus, so a phone's keyboard stays up.
+//   - box.files: the host's file handling (src/files.ts ChatFiles: upload,
+//     url, and optionally list, remove, actions, maxBytes). With it, files
+//     pasted into the input, dropped anywhere on the box (an overlay takes
+//     the drop) or picked with an upload action (fileAction() / mediaAction()
+//     without their own `upload`) show as chips over the input — a
+//     thumbnail or the file's extension, name, size, progress, × — and go
+//     out with the next line as `attachments` (refs, never bytes). A send
+//     waits for uploads still running; files alone go out with their names
+//     as the text. Sent lines show their files from `files.url(ref)`: safe
+//     image types inline, anything else as a link. With `files.list`, the +
+//     menu has a Files item: the stored files, the usage, a confirmed
+//     Delete (`files.remove`) and the host's own actions on each.
 //   - tree-placement ("leading", the default | "menu" | "hidden"): the tree
 //     button on the bar, as a + menu item, or not at all.
 //   - mic-placement ("trailing", the default | "leading" | "inside" |
@@ -135,6 +147,7 @@
 import {
   BUSY_AFTER_REPLY_MS,
   BUSY_MS,
+  type AttachmentRef,
   type ChatContext,
   type ChatMessage,
   type EditedEvent,
@@ -163,6 +176,17 @@ import {
   menuGroups,
   oneLine,
 } from "./attach.ts";
+import {
+  type ChatFiles,
+  type FilesListing,
+  type PendingFile,
+  createPendingFiles,
+  dragHasFiles,
+  fileBadge,
+  filesFrom,
+  formatSize,
+  isInlineImage,
+} from "./files.ts";
 import { repinEnd, stillAtEnd } from "./log-pin.ts";
 import { aecOn, applyAec } from "./aec.ts";
 import { DEBOUNCE_MS, afterChange, enterSends, lineBreakSends, partialTail } from "./input.ts";
@@ -230,6 +254,16 @@ export {
   selectionAction,
 } from "./attach.ts";
 export type { Silence, SpeakMeta } from "./speak-rules.ts";
+export {
+  type AttachmentRef,
+  type ChatFiles,
+  type FileItemAction,
+  type FilesListing,
+  type FilesUsage,
+  type MemoryFilesOptions,
+  type StoredFile,
+  memoryFiles,
+} from "./files.ts";
 
 export type AnswerType = "allow" | "deny";
 /**
@@ -337,6 +371,8 @@ const ICONS = {
   plus: `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>`,
   /** An outline tree (a root and two branches): the tree button. */
   tree: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="10" width="7" height="4.5" rx="1.5"/><rect x="14" y="16.5" width="7" height="4.5" rx="1.5"/><path d="M6.5 8v10.75H14M6.5 12.25H14"/></svg>`,
+  /** A tray: the + menu's stored files. */
+  files: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5.5 5h13L21 13v6H3v-6Z"/></svg>`,
 };
 
 const CSS = `
@@ -547,6 +583,60 @@ textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent
 .quote.whole, .attached .q.whole { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 10rem; overflow-y: auto; }
 .quote { margin: 1px 0; padding-inline-start: 6px; border-inline-start: 2px solid color-mix(in oklch, var(--accent) 75%, transparent); font-size: 11px; }
 .files { display: flex; flex-wrap: wrap; gap: 4px; margin: 1px 0; font-size: 11px; }
+/* Files for the next line (box.files): chips over the input. */
+.filerow { pointer-events: auto; display: flex; flex-wrap: wrap; gap: 4px; padding: 0 0 4px; }
+.fchip {
+  position: relative; display: flex; align-items: center; gap: 6px; max-width: 14rem; overflow: hidden;
+  padding: 3px 2px 3px 3px; border-radius: 8px; font-size: 11px; line-height: 1.3;
+  background: color-mix(in oklch, var(--accent) 10%, var(--glass)); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.fchip .thumb { flex: none; width: 28px; height: 28px; border-radius: 5px; object-fit: cover; }
+.fchip .ext { display: inline-flex; align-items: center; justify-content: center; font-size: 9px; color: var(--muted); background: color-mix(in oklch, currentColor 8%, transparent); }
+.fchip .lab { flex: 1; min-width: 0; }
+.fchip .lab > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fchip .note { font-size: 10px; color: var(--muted); }
+.fchip .note.bad, .fpanel .bad { color: var(--liagent-danger, oklch(0.55 0.17 25)); }
+.fchip .x { all: unset; cursor: pointer; flex: none; padding: 0 6px; color: var(--muted); font-size: 13px; line-height: 24px; }
+.fchip .prog { position: absolute; inset-inline-start: 0; bottom: 0; height: 2px; background: var(--accent); transition: width .15s linear; }
+/* Files under a sent line: safe images inline, the rest as links. */
+.sfiles { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 2px 0; font-size: 11px; }
+.sfile { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; pointer-events: auto; }
+.sfile img { display: block; max-height: 8rem; max-width: 10rem; border-radius: 8px; object-fit: cover; }
+.sfile .fname { display: inline-flex; gap: 6px; max-width: 14rem; padding: 2px 8px; border-radius: 8px; color: inherit; text-decoration: none; background: color-mix(in oklch, var(--accent) 10%, transparent); }
+.sfile .fname .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sfile .fname .z { flex: none; color: var(--muted); }
+.fact { flex: none; padding: 3px 10px; border-radius: 999px; font-size: 11px; line-height: 1.3; color: oklch(1 0 0); background: var(--accent); }
+.fact.del { color: var(--liagent-danger, oklch(0.55 0.17 25)); background: color-mix(in oklch, currentColor 10%, transparent); }
+.fact.del.yes { color: oklch(1 0 0); background: var(--liagent-danger, oklch(0.55 0.17 25)); }
+/* The drop target: the whole box while files are dragged over the window. */
+.drop {
+  pointer-events: auto; position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center;
+  min-height: 6rem; padding: 8px; text-align: center; font-size: 13px; border-radius: var(--bar-r);
+  border: 2px dashed var(--accent); background: color-mix(in oklch, var(--accent) 16%, transparent);
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+}
+.drop[hidden] { display: none; }
+/* The + menu's Files: the stored files. */
+.fpanel {
+  pointer-events: auto; position: absolute; bottom: 100%; left: 0; margin-bottom: 4px; z-index: 1;
+  display: flex; flex-direction: column; width: min(20rem, 100%); max-height: min(24rem, 60vh); overflow: hidden;
+  padding: 4px; text-shadow: none; border-radius: calc(var(--bar-r) - 2px);
+  background: var(--liagent-menu-bg, color-mix(in oklch, var(--bg) 92%, transparent));
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 12px 32px -10px color-mix(in oklch, CanvasText 40%, transparent);
+}
+.fpanel[hidden] { display: none; }
+.fpanel .fhead { display: flex; align-items: center; padding: 4px 4px 0 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.fpanel .fhead span { flex: 1; opacity: .6; }
+.fpanel .fhead .x { padding: 4px 8px; font-size: 14px; color: var(--muted); }
+.fpanel .fusage, .fpanel .fline { padding: 2px 10px 4px; font-size: 11px; color: var(--muted); }
+.fpanel .fline.bad { color: var(--liagent-danger, oklch(0.55 0.17 25)); }
+.fpanel .frows { min-height: 0; overflow-y: auto; }
+.fpanel .frow { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; }
+.fpanel .frow .q { flex: 1; min-width: 0; }
+.fpanel .fwhat { flex: 1; min-width: 0; color: inherit; text-decoration: none; }
+.fpanel .fwhat > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fpanel .meta { font-size: 10px; color: var(--muted); }
 .files a, .files span { pointer-events: auto; color: inherit; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .unread {
   pointer-events: none; position: absolute; top: -6px; inset-inline-end: -6px; border-radius: 999px; padding: 0 4px;
@@ -627,7 +717,7 @@ ${TREE_CHIPS_CSS}
 [hidden] { display: none !important; }
 `;
 
-type Panel = "none" | "menu" | "tree" | "plus";
+type Panel = "none" | "menu" | "tree" | "plus" | "files";
 /** Where the slotted mic goes (attribute mic-placement). */
 export type MicPlacement = "trailing" | "leading" | "inside" | "hidden";
 /** Where the tree button goes (attribute tree-placement). */
@@ -665,6 +755,10 @@ type Els = Record<
   | "mic"
   | "micslot"
   | "att"
+  | "filerow"
+  | "drop"
+  | "fpanel"
+  | "picker"
   | "lead"
   | "trail"
   | "plus"
@@ -691,13 +785,14 @@ export class ChatBox extends Base {
    * Called with each draft that goes out, and the state-tree node it is
    * addressed to (absent = the main thread); `opts.source` is "stt" when the
    * line is dictation, sent unchanged; `opts.context` is what the user
-   * attached with the + menu. Return false if it could not be sent (the
-   * draft and the attachment are kept).
+   * attached with the + menu; `opts.attachments` are the files stored
+   * through `box.files` for this line. Return false if it could not be sent
+   * (the draft, the attachment and the files are kept).
    */
   onSend?: (
     text: string,
     to?: string,
-    opts?: { source?: MessageSource; context?: ChatContext },
+    opts?: { source?: MessageSource; context?: ChatContext; attachments?: AttachmentRef[] },
   ) => boolean;
   /** The user answered a pairing request. */
   onAnswer?: (type: AnswerType, p: PairInfo, answer: Answer) => void;
@@ -767,6 +862,22 @@ export class ChatBox extends Base {
   /** Quotes shown whole (tapped), by message id ("" = the chip's). */
   private wholeQuotes = new Set<string>();
   private noticeTimer?: ReturnType<typeof setTimeout>;
+  /** The host's file handling (src/files.ts); absent: no files. */
+  private _files?: ChatFiles;
+  /** Files for the next line: uploading or stored, removable until sent. */
+  private pendingFiles = createPendingFiles({
+    files: () => this._files,
+    objectUrl:
+      typeof URL !== "undefined" && typeof URL.createObjectURL === "function"
+        ? { create: (f) => URL.createObjectURL(f), revoke: (u) => URL.revokeObjectURL(u) }
+        : undefined,
+  });
+  /** A send waited for uploads: it goes once they are done. */
+  private waitFiles = false;
+  /** Files are being dragged over the window (the drop overlay is up). */
+  private dragging = 0;
+  /** The file list's state (the + menu's Files): loading, loaded, failed; which row asks to delete. */
+  private fileList: { data?: FilesListing; failed?: boolean; asking?: string } = {};
   /** The log's re-pin scrolled it (its own scroll event is not the user's). */
   private ownPin = false;
 
@@ -981,6 +1092,29 @@ export class ChatBox extends Base {
   }
   get actions(): readonly ChatAction[] {
     return this._actions;
+  }
+  /**
+   * The host's file handling (src/files.ts ChatFiles): paste, drop and the
+   * upload actions store files through it, sent lines show their files from
+   * its URLs, and the + menu's Files lists (and deletes) what it stored.
+   * Absent (the default): no files; upload actions show disabled.
+   */
+  set files(v: ChatFiles | null | undefined) {
+    this._files =
+      v && typeof v.upload === "function" && typeof v.url === "function" ? v : undefined;
+    if (!this._files) {
+      this.pendingFiles.take();
+      if (this.panel === "files") this.setPanel("none");
+    }
+    this.renderAll();
+  }
+  get files(): ChatFiles | undefined {
+    return this._files;
+  }
+  /** Upload these through `box.files` for the next line, as pasted or dropped files are. */
+  addFiles(list: readonly File[]) {
+    if (!this._files || this._notice) return;
+    this.pendingFiles.add(list);
   }
   /** Where the slotted mic goes. Attribute: mic-placement. */
   get micPlacement(): MicPlacement {
@@ -1197,6 +1331,10 @@ export class ChatBox extends Base {
     addEventListener("orientationchange", this.relayout);
     globalThis.visualViewport?.addEventListener("resize", this.relayout);
     document.addEventListener("visibilitychange", this.pageHid);
+    addEventListener("dragenter", this.dragEnter, true);
+    addEventListener("dragleave", this.dragLeave, true);
+    addEventListener("drop", this.dragDone, true);
+    addEventListener("dragend", this.dragDone, true);
     this.dropRetired();
     if (this.root) {
       this.loadTree();
@@ -1241,6 +1379,342 @@ export class ChatBox extends Base {
     removeEventListener("orientationchange", this.relayout);
     globalThis.visualViewport?.removeEventListener("resize", this.relayout);
     document.removeEventListener("visibilitychange", this.pageHid);
+    removeEventListener("dragenter", this.dragEnter, true);
+    removeEventListener("dragleave", this.dragLeave, true);
+    removeEventListener("drop", this.dragDone, true);
+    removeEventListener("dragend", this.dragDone, true);
+    this.dragging = 0;
+  }
+
+  // ---- files ------------------------------------------------------------------
+
+  /** Files can be added now: a host, the box open, the chat available. */
+  private takesFiles() {
+    return !!this._files && this.open && !this._notice;
+  }
+  /**
+   * Files dragged into the window: the whole box takes the drop (its log is
+   * click-through otherwise), so a dropped file uploads instead of its name
+   * landing in the input. Ends on a drop, or on leaving the window.
+   */
+  private dragEnter = (e: DragEvent) => {
+    if (!this.takesFiles() || !dragHasFiles(e.dataTransfer)) return;
+    this.setDragging(true);
+  };
+  private dragLeave = () => {
+    if (this.dragging) this.setDragging(this.dragging - 1 > 0, true);
+  };
+  private dragDone = () => this.setDragging(false);
+  private setDragging(on: boolean, leaving = false) {
+    this.dragging = on ? (leaving ? this.dragging - 1 : this.dragging + 1) : 0;
+    const d = this.els.drop;
+    if (!d) return;
+    d.hidden = !this.dragging || !this.takesFiles();
+    d.textContent = this.ui.attachDrop;
+  }
+  /** Open the device's file picker (an upload action's `accept`). */
+  private pickFiles(accept?: string) {
+    const el = this.els.picker as HTMLInputElement | undefined;
+    if (!el || !this._files) return;
+    el.accept = accept ?? "";
+    el.click();
+  }
+  /** Uploads finished: a held send goes now; files alone go after the usual pause. */
+  private afterUpload() {
+    if (this.pendingFiles.busy()) return;
+    if (this.waitFiles) {
+      this.waitFiles = false;
+      this.submit();
+    } else if (this.pendingFiles.ready() && !this._draft.trim()) this.armFiles();
+  }
+  /** Files alone, no draft: they go out after the debounce, as a typed line would. */
+  private armFiles() {
+    this.disarm();
+    if (this._micActive || this._partial || this.composing) return;
+    const bar = document.createElement("div");
+    bar.className = "drain";
+    bar.setAttribute("aria-hidden", "true");
+    bar.style.setProperty("--drain-ms", `${DEBOUNCE_MS}ms`);
+    this.els.bar?.prepend(bar);
+    this.timer = setTimeout(() => this.submit(), DEBOUNCE_MS);
+  }
+  /** Over the input: one chip per pending file, with its progress and an ×. */
+  private renderFiles() {
+    const row = this.els.filerow;
+    if (!row) return;
+    const list = this.pendingFiles.get();
+    row.hidden = !list.length || !this.open || !this._files;
+    row.replaceChildren(...list.map((f) => this.pendingChip(f)));
+  }
+  private pendingChip(f: PendingFile): HTMLElement {
+    const ui = this.ui;
+    const chip = document.createElement("div");
+    chip.className = "fchip";
+    chip.dataset.state = f.state;
+    if (f.state === "uploading") chip.title = ui.attachUploading;
+    if (f.thumb) {
+      const img = document.createElement("img");
+      img.className = "thumb";
+      img.alt = "";
+      img.src = f.thumb;
+      chip.append(img);
+    } else {
+      const b = document.createElement("span");
+      b.className = "thumb ext";
+      b.setAttribute("aria-hidden", "true");
+      b.textContent = fileBadge(f.name);
+      chip.append(b);
+    }
+    const lab = document.createElement("span");
+    lab.className = "lab";
+    const name = document.createElement("span");
+    name.textContent = f.name;
+    const note = document.createElement("span");
+    const bad =
+      f.state === "failed" ? ui.attachFailed : f.state === "too-big" ? ui.attachTooBig : "";
+    note.className = bad ? "note bad" : "note";
+    note.textContent = bad || formatSize(f.size);
+    lab.append(name, note);
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "x";
+    x.textContent = "×";
+    x.setAttribute("aria-label", ui.attachFileRemove);
+    x.addEventListener("pointerdown", keepFocus);
+    x.addEventListener("click", () => this.pendingFiles.remove(f.key));
+    chip.append(lab, x);
+    if (f.state === "uploading") {
+      const bar = document.createElement("span");
+      bar.className = "prog";
+      bar.setAttribute("aria-hidden", "true");
+      const pct = f.size ? Math.min(100, Math.round((f.sent / f.size) * 100)) : 0;
+      bar.style.width = `${pct}%`;
+      chip.append(bar);
+    }
+    return chip;
+  }
+  /** The host's actions on one stored file, as small buttons. */
+  private fileActions(r: AttachmentRef): HTMLElement[] {
+    let acts: { id: string; label: string; run: () => void }[] = [];
+    try {
+      acts = this._files?.actions?.(r) ?? [];
+    } catch {}
+    return acts.map((a) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "fact";
+      b.dataset.action = a.id;
+      b.textContent = a.label;
+      b.addEventListener("pointerdown", keepFocus);
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        try {
+          a.run();
+        } catch {}
+      });
+      return b;
+    });
+  }
+  /** Under a sent line: its images (inline) and files (links), from the host's URL, and the host's actions. */
+  private sentFiles(refs: readonly AttachmentRef[]): HTMLElement {
+    const out = document.createElement("span");
+    out.className = "sfiles";
+    for (const r of refs) {
+      let href = "";
+      try {
+        href = this._files?.url(r) ?? "";
+      } catch {}
+      // A URL the page can fetch: http(s), a path, or a blob: of this page.
+      const ok = /^(https?:\/\/|\/(?!\/)|blob:)/i.test(href);
+      const one = document.createElement("span");
+      one.className = "sfile";
+      if (ok && isInlineImage(r.type)) {
+        const a = document.createElement("a");
+        a.href = href;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.title = r.name;
+        const img = document.createElement("img");
+        img.src = href;
+        img.alt = r.name;
+        img.loading = "lazy";
+        a.append(img);
+        one.append(a);
+      } else {
+        const chip = document.createElement(ok ? "a" : "span");
+        chip.className = "fname";
+        if (ok) {
+          (chip as HTMLAnchorElement).href = href;
+          (chip as HTMLAnchorElement).rel = "noopener noreferrer";
+          (chip as HTMLAnchorElement).download = r.name;
+        }
+        chip.setAttribute("aria-label", `${this.ui.attachFile}: ${r.name}`);
+        const n = document.createElement("span");
+        n.className = "n";
+        n.textContent = r.name;
+        const z = document.createElement("span");
+        z.className = "z";
+        z.textContent = formatSize(r.size);
+        chip.append(n, z);
+        one.append(chip);
+      }
+      one.append(...this.fileActions(r));
+      out.append(one);
+    }
+    return out;
+  }
+  /** Open the + menu's Files: the stored files, loaded again each time (no polling). */
+  private openFileList() {
+    this.fileList = {};
+    this.setPanel("files");
+    const files = this._files;
+    files?.list?.().then(
+      (data) => {
+        if (this._files !== files || this.panel !== "files") return;
+        this.fileList = { data };
+        this.renderFileList();
+      },
+      () => {
+        if (this._files !== files || this.panel !== "files") return;
+        this.fileList = { failed: true };
+        this.renderFileList();
+      },
+    );
+  }
+  private deleteFile(id: string) {
+    const files = this._files;
+    this.fileList.asking = undefined;
+    this.renderFileList();
+    files?.remove?.(id).then(
+      () => {
+        const d = this.fileList.data;
+        if (!d) return;
+        const gone = d.items.find((x) => x.id === id);
+        const usage = d.usage &&
+          gone && {
+            ...d.usage,
+            bytes: Math.max(0, d.usage.bytes - gone.size),
+            items: Math.max(0, d.usage.items - 1),
+          };
+        this.fileList.data = {
+          items: d.items.filter((x) => x.id !== id),
+          ...(usage ? { usage } : d.usage ? { usage: d.usage } : {}),
+        };
+        this.renderFileList();
+      },
+      () => {
+        this.fileList.failed = true;
+        this.renderFileList();
+      },
+    );
+  }
+  /** The + menu's Files panel: usage, rows (download, host actions, a confirmed Delete), ×. */
+  private renderFileList() {
+    const p = this.els.fpanel;
+    if (!p) return;
+    const files = this._files;
+    p.hidden = this.panel !== "files" || !files?.list;
+    if (p.hidden || !files) return p.replaceChildren();
+    const ui = this.ui;
+    p.setAttribute("aria-label", ui.files);
+    const head = document.createElement("div");
+    head.className = "fhead";
+    const t = document.createElement("span");
+    t.textContent = ui.files;
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "x";
+    x.textContent = "×";
+    x.setAttribute("aria-label", ui.filesClose);
+    x.addEventListener("click", () => this.setPanel("none"));
+    head.append(t, x);
+    const nodes: Node[] = [head];
+    const { data, failed, asking } = this.fileList;
+    const line = (cls: string, text: string) => {
+      const d = document.createElement("div");
+      d.className = cls;
+      d.textContent = text;
+      nodes.push(d);
+    };
+    if (data?.usage) {
+      const u = data.usage;
+      line(
+        "fusage",
+        (u.quota ? ui.filesUsageQuota : ui.filesUsage)
+          .replace("{size}", formatSize(u.bytes))
+          .replace("{quota}", formatSize(u.quota ?? 0))
+          .replace("{n}", String(u.items)),
+      );
+    }
+    if (failed) line("fline bad", ui.filesFailed);
+    if (data && !data.items.length) line("fline", ui.filesEmpty);
+    const body = document.createElement("div");
+    body.className = "frows";
+    for (const r of data?.items ?? []) {
+      const row = document.createElement("div");
+      row.className = "frow";
+      row.dataset.id = r.id;
+      if (asking === r.id) {
+        row.classList.add("ask");
+        const q = document.createElement("span");
+        q.className = "q";
+        q.textContent = ui.filesDeleteConfirm;
+        const yes = document.createElement("button");
+        yes.type = "button";
+        yes.className = "fact del yes";
+        yes.textContent = ui.filesDelete;
+        yes.addEventListener("click", () => this.deleteFile(r.id));
+        const no = document.createElement("button");
+        no.type = "button";
+        no.className = "fact";
+        no.textContent = ui.filesKeep;
+        no.addEventListener("click", () => {
+          this.fileList.asking = undefined;
+          this.renderFileList();
+        });
+        row.append(q, yes, no);
+      } else {
+        let href = "";
+        try {
+          href = files.url(r);
+        } catch {}
+        const ok = /^(https?:\/\/|\/(?!\/)|blob:)/i.test(href);
+        const a = document.createElement(ok ? "a" : "span");
+        a.className = "fwhat";
+        if (ok) {
+          (a as HTMLAnchorElement).href = href;
+          (a as HTMLAnchorElement).rel = "noopener noreferrer";
+          (a as HTMLAnchorElement).download = r.name;
+        }
+        const n = document.createElement("span");
+        n.textContent = r.name;
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = [
+          formatSize(r.size),
+          new Date(r.at).toLocaleString(),
+          r.processedAt ? ui.filesProcessed : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        a.append(n, meta);
+        row.append(a, ...this.fileActions(r));
+        if (files.remove) {
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "fact del";
+          del.textContent = ui.filesDelete;
+          del.addEventListener("click", () => {
+            this.fileList.asking = r.id;
+            this.renderFileList();
+          });
+          row.append(del);
+        }
+      }
+      body.append(row);
+    }
+    nodes.push(body);
+    p.replaceChildren(...nodes);
   }
 
   /** The page hid (another tab, the app in the background, the screen locked): stop reading. */
@@ -1250,9 +1724,11 @@ export class ChatBox extends Base {
 
   /** A tap anywhere outside the menu and the mark closes the menu. */
   private outside = (e: Event) => {
-    if (this.panel !== "menu" && this.panel !== "plus") return;
+    if (this.panel !== "menu" && this.panel !== "plus" && this.panel !== "files") return;
     const path = e.composedPath();
-    if (this.panel === "plus") {
+    if (this.panel === "files") {
+      if (path.includes(this.els.fpanel!) || path.includes(this.els.plus!)) return;
+    } else if (this.panel === "plus") {
       if (path.includes(this.els.amenu!) || path.includes(this.els.plus!)) return;
     } else if (path.includes(this.els.menu!) || path.includes(this.els.mark!)) return;
     this.setPanel("none");
@@ -1298,6 +1774,7 @@ export class ChatBox extends Base {
   <div class="warn" id="warn" role="alert" hidden></div>
   <div class="asks" id="asks" aria-label="Agent connections"></div>
   <div class="attrow" id="att" hidden></div>
+  <div class="filerow" id="filerow" hidden></div>
   <div class="rowbox" id="rowbox">
     <div class="aim" id="aim" hidden></div>
     <div class="bar" id="bar">
@@ -1323,7 +1800,10 @@ export class ChatBox extends Base {
     </div>
     <div class="menu" id="menu" role="menu" hidden></div>
     <div class="amenu" id="amenu" role="menu" hidden></div>
+    <div class="fpanel" id="fpanel" role="dialog" hidden></div>
   </div>
+  <div class="drop" id="drop" hidden></div>
+  <input type="file" id="picker" multiple hidden />
 </section>`;
     for (const el of r.querySelectorAll<HTMLElement>("[id]")) this.els[el.id] = el;
     const { box, bar, mark, treebtn, column, floats, rowbox } = this.els as Els;
@@ -1396,6 +1876,38 @@ export class ChatBox extends Base {
     plus.addEventListener("pointerdown", keepFocus);
     plus.addEventListener("click", () => this.setPanel(this.panel === "plus" ? "none" : "plus"));
     this.els.amenu!.addEventListener("pointerdown", keepFocus);
+    this.els.fpanel!.addEventListener("pointerdown", keepFocus);
+
+    // Files: picked, pasted, or dropped anywhere on the box (src/files.ts).
+    const picker = this.els.picker as HTMLInputElement;
+    picker.addEventListener("change", () => {
+      this.addFiles(Array.from(picker.files ?? []));
+      picker.value = "";
+    });
+    ta.addEventListener("paste", (e) => {
+      if (!this._files) return;
+      const got = filesFrom(e.clipboardData);
+      if (!got.length) return;
+      e.preventDefault();
+      this.addFiles(got);
+    });
+    box.addEventListener("dragover", (e) => {
+      if (!this.takesFiles() || !dragHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    });
+    box.addEventListener("drop", (e) => {
+      this.setDragging(false);
+      if (!this.takesFiles()) return;
+      const got = filesFrom(e.dataTransfer);
+      if (!got.length) return;
+      e.preventDefault();
+      this.addFiles(got);
+    });
+    this.pendingFiles.subscribe(() => {
+      this.renderFiles();
+      this.afterUpload();
+    });
 
     if (typeof ResizeObserver !== "undefined") {
       let width = ta.clientWidth;
@@ -1812,13 +2324,30 @@ export class ChatBox extends Base {
         return false;
       }
     }
+    // Files still uploading: the line waits for them, and goes once they are stored.
+    if (this.pendingFiles.busy()) {
+      this.waitFiles = true;
+      return false;
+    }
+    const stored = this.pendingFiles.get().filter((p) => p.state === "done" && p.ref);
+    // Files alone: the line's text is their names (a line always has text).
+    if (!text && stored.length)
+      text = stored
+        .map((p) => p.name)
+        .join(", ")
+        .slice(0, MAX_CHAT);
     if (!text) return false;
     const to = this._target === ROOT_NODE ? undefined : this._target;
     const source = draftSource(this._draft, this.pure);
     const context = this._attached ?? undefined;
+    const attachments = stored.map((p) => p.ref!);
     const opts =
-      source || context
-        ? { ...(source ? { source } : {}), ...(context ? { context } : {}) }
+      source || context || attachments.length
+        ? {
+            ...(source ? { source } : {}),
+            ...(context ? { context } : {}),
+            ...(attachments.length ? { attachments } : {}),
+          }
         : undefined;
     if (!this.onSend?.(text, to, opts)) {
       this.offline = true;
@@ -1826,6 +2355,7 @@ export class ChatBox extends Base {
       return false;
     }
     this.offline = false;
+    if (this.pendingFiles.get().length) this.pendingFiles.take();
     if (context) {
       // The line took it: the actions that attached it let it go (a kept selection…).
       for (const a of this._actions) if (this.attachedBy.has(a.id)) a.sent?.();
@@ -1965,6 +2495,7 @@ export class ChatBox extends Base {
     this.renderLayout();
     this.renderMenu();
     this.renderActions();
+    this.renderFileList();
     if (opening && this.open) this.els.column!.scrollTop = 0;
     requestAnimationFrame?.(() => this.fit());
   }
@@ -2000,6 +2531,8 @@ export class ChatBox extends Base {
     this.renderStatus();
     this.renderMenu();
     this.renderActions();
+    this.renderFiles();
+    this.renderFileList();
   }
 
   /** Open or minimized, which panel, the column's size: the box's frame. */
@@ -2011,6 +2544,7 @@ export class ChatBox extends Base {
     box.classList.toggle("on", this._micActive || this.panel !== "none");
     box.classList.toggle("typing", this.typing && this.open);
     this.renderAttached();
+    this.renderFiles();
     column.hidden = !this.open;
     slot.toggleAttribute("inert", !this.open);
     if (this.open) slot.removeAttribute("aria-hidden");
@@ -2203,7 +2737,10 @@ export class ChatBox extends Base {
   /** A polished line's body (its text, or tapped, the raw STT text) and its sparkle. */
   private lineBody(m: ChatMessage, onToggle: () => void): Node[] {
     const ctx = m.context ? this.contextNodes(m.context, m.id, onToggle) : [];
-    return [...ctx, ...this.lineText(m, onToggle)];
+    // Only the user's own lines carry stored files (the hub drops them elsewhere).
+    const files =
+      m.attachments?.length && m.from !== "agent" ? [this.sentFiles(m.attachments)] : [];
+    return [...ctx, ...files, ...this.lineText(m, onToggle)];
   }
   /** What a line carried (a quote, its files) above its text; text only, never HTML. */
   private contextNodes(c: ChatContext, key: string, onToggle: () => void): Node[] {
@@ -2585,13 +3122,16 @@ export class ChatBox extends Base {
         this.warning = text;
         this.noticeTimer = setTimeout(() => (this.warning = ""), 4000);
       },
+      addFiles: (list) => this.addFiles(list),
       box: this as unknown as HTMLElement,
     };
   }
   /** Run an action: onSelect, then attach (its result merged into the next line's context). */
   private async runAction(a: ChatAction) {
-    if (!actionEnabled(a)) return;
+    if (!this.canRun(a)) return;
     const host = this.actionHost();
+    // An upload action's picker opens first: a browser only opens one from the tap itself.
+    if (a.upload) this.pickFiles(a.accept);
     try {
       await a.onSelect?.(host);
       if (a.attach) {
@@ -2602,6 +3142,10 @@ export class ChatBox extends Base {
       host.notice(e instanceof Error && e.message ? e.message : String(e));
     }
   }
+  /** Whether an action can be picked now: an upload action needs `box.files`. */
+  private canRun(a: ChatAction) {
+    return actionEnabled(a) && (!a.upload || this.takesFiles());
+  }
   /** One bar button for an action. */
   private actionButton(a: ChatAction): HTMLButtonElement {
     const b = document.createElement("button");
@@ -2610,7 +3154,7 @@ export class ChatBox extends Base {
     b.dataset.action = a.id;
     b.setAttribute("aria-label", a.label);
     b.title = a.hint?.() || a.label;
-    b.disabled = !actionEnabled(a);
+    b.disabled = !this.canRun(a);
     b.append(iconNode(a.icon, a.label.slice(0, 1)));
     b.addEventListener("pointerdown", keepFocus);
     b.addEventListener("click", () => void this.runAction(a));
@@ -2640,7 +3184,8 @@ export class ChatBox extends Base {
     treebtn.hidden = this.treePlacement !== "leading";
     const menuTree = this.treePlacement === "menu";
     const groups = menuGroups(this._actions);
-    const any = groups.length > 0 || menuTree;
+    const fileList = !!this._files?.list && !this._notice;
+    const any = groups.length > 0 || menuTree || fileList;
     plus.hidden = !any;
     plus.setAttribute("aria-label", this.ui.attachOpen);
     plus.title = this.ui.attachOpen;
@@ -2693,6 +3238,11 @@ export class ChatBox extends Base {
       icon.innerHTML = ICONS.tree;
       row("tree", this.ui.stateTree, icon, undefined, true, () => this.setPanel("tree"));
     }
+    if (fileList) {
+      const icon = document.createElement("span");
+      icon.innerHTML = ICONS.files;
+      row("files", this.ui.files, icon, undefined, true, () => this.openFileList());
+    }
     for (const g of groups) {
       if (g.group) {
         const head = document.createElement("div");
@@ -2710,7 +3260,7 @@ export class ChatBox extends Base {
           a.label,
           iconNode(a.icon, "+"),
           hint,
-          actionEnabled(a),
+          this.canRun(a),
           () => void this.runAction(a),
         );
       }

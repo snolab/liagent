@@ -1,7 +1,7 @@
 // What `liagent listen --to` types into an agent-yes agent for one chat
 // message. Pure, so it is unit tested (test/deliver.test.ts).
 
-import type { ChatContext, ChatMessage } from "./protocol.ts";
+import type { AttachmentRef, ChatContext, ChatMessage } from "./protocol.ts";
 
 /**
  * `ay send` refuses more than 1024 chars per send, and a long paste into a
@@ -19,7 +19,7 @@ export function deliveryText(
   const replyTo = m.from === "friend" ? ` --to ${m.email || m.thread}` : "";
   const page = m.label.split(" ")[0] || "?";
   const header = `[liagent ${m.id}] ${who} wrote in the chat box (${page}) — reply: liagent say ${hub}${replyTo} "..."\n`;
-  const body = m.text + contextText(m.context);
+  const body = m.text + contextText(m.context) + attachmentsText(m.attachments);
   if (header.length + body.length <= SEND_MAX) return header + body;
   const path = spill(m.id, body);
   const room = Math.max(0, SEND_MAX - header.length - path.length - 40);
@@ -43,4 +43,17 @@ export function contextText(c: ChatContext | undefined): string {
   for (const f of c.files ?? [])
     out.push(`[attached: file ${f.name}${f.type ? ` (${f.type})` : ""}: ${f.url}]`);
   return out.length ? `\n\n${out.join("\n")}` : "";
+}
+
+/**
+ * The files sent with a line (stored by the host), as a block after its
+ * text: one "[attached: file <name> (<type>, <size> bytes) id <id>]" each.
+ * The agent fetches one through the host's own API by its id. "" when none.
+ */
+export function attachmentsText(list: readonly AttachmentRef[] | undefined): string {
+  if (!list?.length) return "";
+  const lines = list.map(
+    (a) => `[attached: file ${a.name} (${a.type}, ${a.size} bytes) id ${a.id}]`,
+  );
+  return `\n\n${lines.join("\n")}`;
 }

@@ -124,6 +124,14 @@ the input's focus, so a phone's keyboard stays up. Theme it with
 `--liagent-menu-bg` and `--liagent-accent`. See
 [docs/embed.md](docs/embed.md#the--menu).
 
+**Files.** Set `box.files` to your own upload handler and the box takes
+pasted, dropped and picked files (`fileAction()` / `mediaAction()` with no
+`upload` of their own): chips with progress and ×, then refs on the line as
+`attachments` (`{id, name, type, size}`, never bytes). Optional `list`,
+`remove` and `actions` add a Files list to the + menu. liagent has no
+storage of its own; `memoryFiles()` is an in-memory host for demos and
+tests. See [docs/embed.md](docs/embed.md#files-paste-drop-pick-and-the-file-list).
+
 **Geometry:** the bar's corner radius is derived, never set:
 `border + padding + control / 2` (`--liagent-bar-border`,
 `--liagent-bar-pad`, `--liagent-control`). The mic is a circle one control

@@ -5,11 +5,13 @@
 //
 // Wire (JSON text frames). An agent knocks on <hub>/control?scope=chat|eval
 // (&label=…, &for=<friend email>); a grant token resumes with x-liagent-token.
-//   page → hub        {type:"chat", id, text, to?, source?, context?}
+//   page → hub        {type:"chat", id, text, to?, source?, context?, attachments?}
 //                                                    (to: a state-tree node path;
 //                                                     source "stt": from the mic, unchanged;
 //                                                     context: what the user attached with
-//                                                     the + menu, ChatContext, cleanContext)
+//                                                     the + menu, ChatContext, cleanContext;
+//                                                     attachments: files the host stored,
+//                                                     AttachmentRef[], cleanAttachments)
 //                     {type:"allow", pair, pages?: string[] | "all"} | {type:"deny"|"revoke", pair}
 //                     {type:"page", label}            (client-side navigation)
 //                     {type:"end-page", id}           (close one of the owner's pages)
@@ -123,6 +125,13 @@ export type ChatMessage = {
   edited?: EditMark;
   /** What the user attached to the line (the box's + menu): checked by cleanContext. */
   context?: ChatContext;
+  /**
+   * Files sent with the line (pasted, dropped, or picked in the + menu) and
+   * stored by the host's `box.files` (src/files.ts): the host's id for each
+   * and what it is, never the bytes. The host says where to fetch one
+   * (`files.url(ref)`). Checked by cleanAttachments; owner lines only.
+   */
+  attachments?: AttachmentRef[];
 };
 
 /** Where an owner line came from: "stt" (the box's mic). Absent = typed. */
@@ -233,6 +242,7 @@ export type PageMessage =
       to?: string;
       source?: MessageSource;
       context?: ChatContext;
+      attachments?: AttachmentRef[];
     }
   | {
       type: "result";
@@ -370,6 +380,8 @@ export function parsePageMessage(raw: unknown): PageMessage | null {
     if (m.source === "stt") out.source = "stt";
     const context = cleanContext(m.context);
     if (context) out.context = context;
+    const attachments = cleanAttachments(m.attachments);
+    if (attachments) out.attachments = attachments;
     return out;
   }
   if (m.type === "result") {
@@ -769,4 +781,54 @@ export function mergeContext(
     host: sel.host ?? b.host ?? a.host,
     files,
   });
+}
+
+// ---- attachments: files the host stored for a line ----------------------------
+
+/** Most files sent with one line. */
+export const MAX_ATTACHMENTS = 10;
+/** Most characters of an attached file's name. */
+export const MAX_ATTACHMENT_NAME = 200;
+
+/**
+ * A file sent with a line (ChatMessage.attachments): the host's id for the
+ * stored upload, the file's name (for display only), its media type and its
+ * size in bytes. Where to fetch it is the host's business (ChatFiles.url).
+ */
+export type AttachmentRef = { id: string; name: string; type: string; size: number };
+
+/** Control and bidirectional-override characters: never in a shown file name. */
+// oxlint-disable-next-line no-control-regex
+const NAME_JUNK = /[\u0000-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+/** A file name for display: no control or bidi characters, no folders, bounded; "file" if empty. */
+export function cleanFileName(raw: unknown): string {
+  const s = typeof raw === "string" ? raw : "";
+  const base = s.replace(NAME_JUNK, "").split(/[\\/]/).at(-1)!.trim();
+  return base.slice(0, MAX_ATTACHMENT_NAME) || "file";
+}
+
+/**
+ * AttachmentRefs from the wire (or a host), or undefined: known keys only,
+ * each checked (an id of 1–64 of [A-Za-z0-9_-], a media type that looks like
+ * one, else application/octet-stream, a whole size ≥ 0, else 0); the same id
+ * once; at most MAX_ATTACHMENTS.
+ */
+export function cleanAttachments(raw: unknown): AttachmentRef[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: AttachmentRef[] = [];
+  for (const a of raw.slice(0, MAX_ATTACHMENTS)) {
+    if (!a || typeof a !== "object") continue;
+    const r = a as Record<string, unknown>;
+    if (typeof r.id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(r.id)) continue;
+    if (out.some((x) => x.id === r.id)) continue;
+    const type =
+      typeof r.type === "string" && /^[a-z0-9.+-]{1,40}\/[a-z0-9.+-]{1,60}$/.test(r.type)
+        ? r.type
+        : "application/octet-stream";
+    const size =
+      typeof r.size === "number" && Number.isSafeInteger(r.size) && r.size >= 0 ? r.size : 0;
+    out.push({ id: r.id, name: cleanFileName(r.name), type, size });
+  }
+  return out.length ? out : undefined;
 }
