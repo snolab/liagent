@@ -511,7 +511,7 @@ export function compile(code: string): () => Promise<unknown> {
 
 // ── State-tree node paths ─────────────────────────────────────────────────
 // Messages are addressed to state-tree nodes; a node's assignee (agent or
-// human) receives them. The same rules as Lianki's debug chat.
+// human) receives them.
 
 /** Longest node path kept, in characters ("/words/prefetch"). */
 export const MAX_NODE_PATH = 80;
