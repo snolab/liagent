@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Added
+
+- **Files in the chat.** `box.files` takes the host's file handling
+  (`ChatFiles`: `upload(file, onProgress, signal)` → `{id, name, type, size}`,
+  `url(ref)`, and optionally `maxBytes`, `list()`, `remove(id)`,
+  `actions(ref)`). Files pasted into the input, dropped anywhere on the box
+  (an overlay takes the drop) or picked with an upload action
+  (`fileAction()` / `mediaAction()` without `upload`, or any action with
+  `upload: true` and `accept`) show as chips over the input with a
+  thumbnail or extension, size, progress and ×. A send waits for running
+  uploads; files alone go out with their names as the text. Sent lines
+  carry `attachments` (refs, never bytes) and show them from `url(ref)`:
+  raster images inline, the rest as download links, with the host's
+  actions. With `list`, the + menu has a Files panel: usage, rows, a
+  confirmed Delete. `box.addFiles()` and `host.addFiles()` feed files in.
+  `memoryFiles()` is an in-memory host for demos and tests; liagent ships
+  no storage.
+- **`attachments` on the wire.** `{type:"chat", …, attachments}`;
+  `cleanAttachments` / `cleanFileName` on the hub (at most 10, checked ids,
+  names without folders, control or bidi characters), kept on owner lines
+  only; `liagent listen --to` delivers one `[attached: file …]` line each.
+  `onSend` gets them in `opts.attachments`; `connectHub` sends them.
+  New strings: `attachDrop`, `attachUploading`, `attachFailed`,
+  `attachTooBig`, `attachFileRemove`, `files`, `filesEmpty`, `filesUsage`,
+  `filesUsageQuota`, `filesFailed`, `filesProcessed`, `filesDelete`,
+  `filesDeleteConfirm`, `filesKeep`, `filesClose`.
+
 ### Changed
 
 - **No text on the mic.** The "REC" under the icon while capturing is gone:

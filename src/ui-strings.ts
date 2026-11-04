@@ -24,6 +24,37 @@ export type UiStrings = {
   attachQuoted: string;
   /** A file attached (its accessible prefix). */
   attachFile: string;
+  // Files sent with a line (box.files, src/files.ts).
+  /** Big hint over the box while files are dragged over it: let go to attach them to the message. */
+  attachDrop: string;
+  /** Tooltip of a file chip over the input while it is still being uploaded (a progress bar shows). */
+  attachUploading: string;
+  /** Small note on a file chip over the input: the upload did not work; remove it and try again. */
+  attachFailed: string;
+  /** Small note on a file chip over the input: the file is bigger than the host takes, so it was not uploaded. */
+  attachTooBig: string;
+  /** Screen-reader label of the × on a file chip over the input: takes that file off the message before sending. */
+  attachFileRemove: string;
+  /** The + menu item, and the panel's title, that lists the files sent in the chat. One word, a noun. */
+  files: string;
+  /** Muted line in that list when no file has been sent yet. */
+  filesEmpty: string;
+  /** Muted line at the top of that list: how much is stored. {size} like "12 MB", {n} a count of files. */
+  filesUsage: string;
+  /** The same with a storage limit: {size} used of {quota} (both like "12 MB"), {n} files. */
+  filesUsageQuota: string;
+  /** Line in that list when it could not be loaded (or a delete failed). */
+  filesFailed: string;
+  /** Small tag on a file in that list: the agent has already handled it. Past participle. */
+  filesProcessed: string;
+  /** Button on a file in that list: deletes that one file for good (asks to confirm first). */
+  filesDelete: string;
+  /** The question that replaces a file's row after Delete was tapped: it is removed for good. */
+  filesDeleteConfirm: string;
+  /** The button next to that question that keeps the file. */
+  filesKeep: string;
+  /** Screen-reader label of the × that closes that list. */
+  filesClose: string;
   /** Echo cancellation in the menu, when a mic is in the box. */
   echoOn: string;
   echoOff: string;
@@ -43,6 +74,21 @@ export const UI_EN: UiStrings = {
   attachRemove: "Remove the attachment",
   attachQuoted: "Quoted from the page",
   attachFile: "File",
+  attachDrop: "Drop to attach",
+  attachUploading: "Uploading…",
+  attachFailed: "Upload failed",
+  attachTooBig: "Too large",
+  attachFileRemove: "Remove this file",
+  files: "Files",
+  filesEmpty: "Nothing here yet.",
+  filesUsage: "{size} stored · {n} files",
+  filesUsageQuota: "{size} of {quota} used · {n} files",
+  filesFailed: "Could not load the files.",
+  filesProcessed: "Processed",
+  filesDelete: "Delete",
+  filesDeleteConfirm: "Delete for good?",
+  filesKeep: "Keep",
+  filesClose: "Close the files",
   echoOn: "Echo cancellation on",
   echoOff: "Echo cancellation off",
 };
@@ -61,6 +107,21 @@ export const UI_ZH: UiStrings = {
   attachRemove: "移除附件",
   attachQuoted: "引用自页面",
   attachFile: "文件",
+  attachDrop: "松手即可附加",
+  attachUploading: "上传中…",
+  attachFailed: "上传失败",
+  attachTooBig: "文件过大",
+  attachFileRemove: "移除此文件",
+  files: "文件",
+  filesEmpty: "这里还没有文件。",
+  filesUsage: "已存 {size} · {n} 个文件",
+  filesUsageQuota: "已用 {size} / {quota} · {n} 个文件",
+  filesFailed: "无法加载文件列表。",
+  filesProcessed: "已处理",
+  filesDelete: "删除",
+  filesDeleteConfirm: "永久删除？",
+  filesKeep: "保留",
+  filesClose: "关闭文件列表",
   echoOn: "回声消除：开",
   echoOff: "回声消除：关",
 };

@@ -300,6 +300,7 @@ type Chat = {
     agentId?: string;
     to?: string;
     context?: unknown;
+    attachments?: unknown;
   };
 };
 const chats = (ws: FakeSocket) =>
@@ -354,6 +355,25 @@ describe("ChatHub chat", () => {
     };
     expect(chats(p).at(-1)?.context).toEqual(want);
     expect(chats(agent).at(-1)?.context).toEqual(want);
+  });
+
+  it("an owner line's attachments are cleaned, kept and passed on", async () => {
+    const { page, controller, msg, pairOf } = setup();
+    const p = page();
+    const agent = controller("agent");
+    await msg(p, { type: "allow", pair: pairOf(p) });
+    await msg(p, {
+      type: "chat",
+      id: "f1",
+      text: "here",
+      attachments: [
+        { id: "u1", name: "a.png", type: "image/png", size: 3, url: "https://x" },
+        { id: "bad id" },
+      ],
+    });
+    const want = [{ id: "u1", name: "a.png", type: "image/png", size: 3 }];
+    expect(chats(p).at(-1)?.attachments).toEqual(want);
+    expect(chats(agent).at(-1)?.attachments).toEqual(want);
   });
 
   it("a controller's say reaches the pages and is acknowledged", async () => {
@@ -648,6 +668,21 @@ describe("ChatHub friends", () => {
     expect(chats(f).map((m) => m.text)).toEqual(["the button is too small"]);
     // The owner's pages do not get a friend's thread.
     expect(chats(owner)).toEqual([]);
+  });
+
+  it("a friend's line drops attachments (they are the owner's store)", async () => {
+    const s = setup();
+    const owner = s.page();
+    const { c } = await agent(s, owner);
+    const f = await s.friend();
+    await s.msg(f, {
+      type: "chat",
+      id: "a",
+      text: "hi",
+      attachments: [{ id: "u1", name: "a", type: "text/plain", size: 1 }],
+    });
+    expect(chats(c).at(-1)?.text).toBe("hi");
+    expect(chats(c).at(-1)?.attachments).toBeUndefined();
   });
 
   it("a friend's first message tells the agent once", async () => {

@@ -21,6 +21,10 @@
  *   - fileAction({ upload }) / mediaAction({ upload }): a file picker whose
  *     files the HOST uploads (`upload(file)` → {url, name, type?, size?});
  *     liagent never sends file bytes over the chat.
+ *   - fileAction() / mediaAction() without `upload`: an upload action
+ *     (`upload: true`): the box opens the picker with its `accept` and puts
+ *     the files in its pending list, stored through the host's `box.files`
+ *     (src/files.ts); without `box.files` it shows disabled.
  *
  * Pure apart from the DOM it is handed (SelectionDeps), so it is unit tested
  * with fakes (test/attach.test.ts).
@@ -40,6 +44,8 @@ export type ActionHost = {
   close(): void;
   /** Show a short notice over the input (an upload that failed…). */
   notice(text: string): void;
+  /** Upload files through the box's `files` host for the next line (nothing without one). */
+  addFiles(files: readonly File[]): void;
   /** The box itself, for anything else. */
   box: HTMLElement;
 };
@@ -79,6 +85,15 @@ export type ChatAction = {
   ) => ChatContext | null | undefined | Promise<ChatContext | null | undefined>;
   /** The line it attached to went out (a kept selection is let go). */
   sent?: () => void;
+  /**
+   * An upload action: picking it opens the file picker (with `accept`) and
+   * the box uploads what is picked through its `files` host (src/files.ts),
+   * as pasted or dropped files are. Without `box.files` it shows disabled.
+   * onSelect and attach still run first when given.
+   */
+  upload?: boolean;
+  /** An upload action's picker `accept` (absent: any file). */
+  accept?: string;
 };
 
 /** The actions for one place, in the host's order; a later duplicate id is dropped. */
@@ -367,8 +382,12 @@ export function selectionAction(o: SelectionActionOptions = {}): ChatAction {
 export type UploadedFile = ContextFile;
 
 export type FileActionOptions = {
-  /** The host uploads the file and says where it is now (throw to refuse). */
-  upload: (file: File) => Promise<UploadedFile>;
+  /**
+   * The host uploads the file and says where it is now (throw to refuse).
+   * Absent: an upload action, stored through the box's `files` host instead
+   * (with chips, progress and ×; src/files.ts).
+   */
+  upload?: (file: File) => Promise<UploadedFile>;
   id?: string;
   label?: string;
   icon?: string | Node;
@@ -403,20 +422,28 @@ function pickFiles(accept: string | undefined, multiple: boolean): Promise<File[
   });
 }
 
-/** "Attach a file": the host's upload hook, each result attached as a file. */
-export function fileAction(o: FileActionOptions): ChatAction {
-  return {
+/**
+ * "Attach a file": the host's upload hook, each result attached as a file;
+ * without one, an upload action the box stores through `box.files`.
+ */
+export function fileAction(o: FileActionOptions = {}): ChatAction {
+  const base: ChatAction = {
     id: o.id ?? "file",
     label: o.label ?? "Attach a file",
     icon: o.icon ?? "📎",
     group: o.group,
     place: o.place,
+  };
+  const upload = o.upload;
+  if (!upload) return { ...base, upload: true, ...(o.accept ? { accept: o.accept } : {}) };
+  return {
+    ...base,
     attach: async (host) => {
       const files = await (o.pick ?? pickFiles)(o.accept, o.multiple ?? true);
       const done: ContextFile[] = [];
       for (const f of files)
         try {
-          done.push(await o.upload(f));
+          done.push(await upload(f));
         } catch (e) {
           host.notice(o.failed?.(f, e) ?? `Could not attach ${f.name}`);
         }
@@ -426,7 +453,7 @@ export function fileAction(o: FileActionOptions): ChatAction {
 }
 
 /** "Attach a photo or video": fileAction for media (image, video, audio). */
-export function mediaAction(o: FileActionOptions): ChatAction {
+export function mediaAction(o: FileActionOptions = {}): ChatAction {
   return fileAction({
     id: "media",
     label: "Attach a photo or video",

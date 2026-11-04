@@ -63,6 +63,9 @@
 // `context` (what the user attached: a selection, the page it came from,
 // files the host uploaded) is cleaned (cleanContext: known keys, each
 // bounded, http(s) or same-origin file URLs only) and kept on the message.
+// Its `attachments` (files the host's own store keeps: AttachmentRef ids,
+// names, types, sizes; never bytes) are cleaned (cleanAttachments) and kept
+// on owner lines only; a friend's line drops them.
 //
 // Pages. Each page socket has an id; `state` lists the audience's pages
 // ({id, label, at}) and the receiving page's own id (`self`). A page reports
@@ -934,6 +937,7 @@ export class ChatHub {
         ...(m.to ? { to: m.to } : {}),
         ...(m.source ? { source: m.source } : {}),
         ...(m.context ? { context: m.context } : {}),
+        ...(m.attachments ? { attachments: m.attachments } : {}),
       });
     }
     if (m.type === "page") return this.relabel(ws, page, m.label);
