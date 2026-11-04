@@ -26,8 +26,9 @@ function fakes(over: Partial<MicDeps> = {}) {
     const track = {
       readyState: "live",
       stop() {
+        // MediaStreamTrack.stop() on an ended track does nothing: count live tracks stopped
+        if (track.readyState === "live") calls.stops++;
         track.readyState = "ended";
-        calls.stops++;
       },
     };
     return { id, getTracks: () => [track] };
@@ -453,5 +454,86 @@ describe("mic session: overlapping reopens", () => {
     expect(await b).toBe(true);
     expect(f.calls.gum).toBe(3); // the first open, then two passes
     expect(s.view().state).toBe("listening");
+  });
+});
+
+describe("mic session: off while the VAD is still loading (deferred init)", () => {
+  const deferred = (throwOnDestroy: boolean) => {
+    let release!: () => void;
+    const init = new Promise<void>((r) => (release = r));
+    const f = fakes({
+      load: async (): Promise<Vad> => {
+        await init; // MicVAD.new(): addModule + the model, still pending
+        return {
+          start() {},
+          pause() {},
+          flush() {
+            if (throwOnDestroy)
+              throw new Error("MicVAD has null stream, audio context, or processor adapter");
+          },
+          destroy() {
+            if (throwOnDestroy)
+              throw new Error("MicVAD has null stream, audio context, or processor adapter");
+          },
+        };
+      },
+    });
+    return { f, release };
+  };
+  for (const throws of [false, true]) {
+    it(`stops every track and stays off${throws ? " (destroy throws)" : ""}`, async () => {
+      const { f, release } = deferred(throws);
+      const s = createMicSession(f.deps);
+      const on = s.toggle();
+      await tick();
+      expect(s.view().state).toBe("loading");
+      expect(f.calls.gum).toBe(1);
+      await s.off();
+      expect(f.calls.stops).toBe(1);
+      expect(s.view().state).toBe("off");
+      release();
+      await on;
+      await tick();
+      expect(s.view().state).toBe("off");
+      expect(f.calls.gum).toBe(1);
+      expect(f.calls.stops).toBe(1);
+      expect(s.stream()).toBeNull();
+    });
+  }
+  it("a stream that arrives after the off is stopped, never listened on", async () => {
+    let give!: () => void;
+    const f = fakes();
+    const gum = f.deps.getStream;
+    f.deps.getStream = async (c) => {
+      await new Promise<void>((r) => (give = r));
+      return gum(c);
+    };
+    const s = createMicSession(f.deps);
+    const on = s.toggle();
+    await tick();
+    await s.off();
+    give();
+    await on;
+    await tick();
+    expect(s.view().state).toBe("off");
+    expect(f.calls.gum).toBe(1);
+    expect(f.calls.stops).toBe(1);
+    expect(f.calls.vads).toBe(0);
+  });
+  it("an off with a live VAD whose flush/destroy throw still stops the tracks", async () => {
+    const f = fakes();
+    const load = f.deps.load;
+    f.deps.load = async (ev, st, c) => ({
+      ...(await load(ev, st, c)),
+      destroy() {
+        throw new Error("boom");
+      },
+    });
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    expect(s.view().state).toBe("listening");
+    await s.off();
+    expect(f.calls.stops).toBe(1);
+    expect(s.view().state).toBe("off");
   });
 });
