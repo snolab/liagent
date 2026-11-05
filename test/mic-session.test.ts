@@ -581,4 +581,33 @@ describe("mic session: off while the VAD is still loading (deferred init)", () =
     void timers;
     await s.off();
   });
+  it("quick off/on during a slow teardown: one teardown, the new on gets a fresh live stream", async () => {
+    const f = fakes();
+    let release: () => void = () => {};
+    const load = f.deps.load;
+    f.deps.load = async (ev, st, c) => ({
+      ...(await load(ev, st, c)),
+      destroy: () => new Promise<void>((r) => (release = r)),
+    });
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    const first = s.stream();
+    const a = s.off();
+    const b = s.off(); // the second off shares the first teardown
+    const on = s.toggle(); // a tap during teardown waits for it
+    await new Promise((r) => setTimeout(r, 5));
+    expect(f.calls.gum).toBe(1);
+    release();
+    await Promise.all([a, b, on]);
+    expect(f.calls.stops).toBe(1); // only the old stream stopped, once
+    expect(s.view().state).toBe("listening");
+    expect(f.calls.gum).toBe(2);
+    const cur = s.stream();
+    expect(cur).not.toBe(first);
+    expect(cur?.getTracks().every((t) => t.readyState === "live")).toBe(true);
+    release = () => {};
+    const end = s.off();
+    release();
+    await end;
+  });
 });

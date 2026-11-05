@@ -225,6 +225,8 @@ export function createMicSession<C = unknown>(
   };
   const fallback = deps.fallback;
   let prev: MicState = "off";
+  /** The explicit off's cleanup while it runs (shared by a second off; toggle and resume wait for it). */
+  let teardown: Promise<void> | null = null;
   /** The last audio frame's time (0: none yet). */
   let lastFrame = 0;
   const mic = createMic({
@@ -345,6 +347,8 @@ export function createMicSession<C = unknown>(
     /** A tap: on (remembered for a reload), or an explicit off. */
     async toggle() {
       emit({ error: null });
+      // A tap during an off's teardown waits for it: a new on gets a new stream, never the dying one.
+      if (teardown) await teardown;
       if (mic.state() === "off") {
         store.on();
         await mic.toggle();
@@ -353,15 +357,25 @@ export function createMicSession<C = unknown>(
     /** The explicit off: the VAD, the stream and the reload flag all go. */
     async off() {
       offs++;
+      // One teardown at a time: a second off() shares the first one's promise.
+      if (teardown) return teardown;
       store.clear();
       emit({ resume: false });
       epoch++;
-      // The tracks stop whatever the VAD cleanup does (a half-initialised VAD throws).
-      try {
-        await mic.off();
-      } finally {
-        stopStream();
-      }
+      // This off owns the stream it found; a newer one is never touched.
+      const own = stream;
+      stream = null;
+      teardown = (async () => {
+        // The tracks stop whatever the VAD cleanup does (a half-initialised VAD throws).
+        try {
+          await mic.off();
+        } finally {
+          for (const t of own?.getTracks() ?? []) t.stop();
+        }
+      })().finally(() => {
+        teardown = null;
+      });
+      return teardown;
     },
     hold: (on: boolean) => mic.hold(on),
     /** When the last audio frame arrived (ms since epoch; 0 if none): a heartbeat to poll. */
