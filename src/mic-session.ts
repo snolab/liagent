@@ -258,6 +258,9 @@ export function createMicSession<C = unknown>(
       const was = prev;
       prev = s;
       emit({ state: s, ...(s !== "off" ? { resume: false } : {}) });
+      // Startup failed (the VAD load, the fallback or start() rejected): the mic says off,
+      // so the tracks stop too. retire() has already taken the stream, so it is not touched.
+      if (s === "off" && was === "loading") stopStream();
       if (voice) {
         voice.setMic(s !== "off");
         // The user starts talking: over the agent it ducks (a barge-in if they

@@ -536,4 +536,29 @@ describe("mic session: off while the VAD is still loading (deferred init)", () =
     expect(f.calls.stops).toBe(1);
     expect(s.view().state).toBe("off");
   });
+  it("a VAD that rejects during startup leaves the mic off with its tracks stopped", async () => {
+    const f = fakes();
+    f.deps.load = async () => {
+      throw new Error("AudioWorklet init failed");
+    };
+    f.deps.fallback = undefined;
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    expect(s.view().state).toBe("off");
+    expect(f.calls.stops).toBe(1);
+    expect(s.stream()).toBeNull();
+  });
+  it("a fallback that also rejects still stops the tracks", async () => {
+    const f = fakes();
+    f.deps.load = async () => {
+      throw new Error("worklet");
+    };
+    f.deps.fallback = async () => {
+      throw new Error("no Web Audio");
+    };
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    expect(s.view().state).toBe("off");
+    expect(f.calls.stops).toBe(1);
+  });
 });
