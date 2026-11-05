@@ -12,6 +12,8 @@
 
 /** Longest utterance: past this it is cut and sent, and listening goes on. */
 export const MAX_UTTERANCE_MS = 30_000;
+/** No audio frame for this long while listening counts as a stalled mic (createMic stallMs). */
+export const STALL_MS = 5_000;
 /** The VADs hand over 16 kHz mono. */
 export const RATE = 16_000;
 /** Partials: one every PARTIAL_EVERY_MS of speech, once it is PARTIAL_MIN_MS long… */
@@ -400,6 +402,14 @@ export function createMic(d: {
   onProb?: (prob: number) => void;
   /** Rolling partial chunks for long utterances (on unless false). */
   partials?: boolean;
+  /** Every audio frame the VAD hands over while on (not held), with its time: a heartbeat. */
+  onFrameBeat?: (at: number) => void;
+  /**
+   * No frame for this long while listening (not held): onError gets a
+   * MicStalledError once (e.g. a suspended AudioContext on a live stream).
+   * Default STALL_MS; 0 turns it off.
+   */
+  stallMs?: number;
   setTimer?: (f: () => void, ms: number) => unknown;
   clearTimer?: (t: unknown) => void;
 }) {
@@ -427,8 +437,26 @@ export function createMic(d: {
   const toMs = (n: number) => Math.round((n / RATE) * 1000);
   const toSamples = (ms: number) => (ms * RATE) / 1000;
 
+  const stallMs = d.stallMs ?? STALL_MS;
+  let dog: unknown;
+  /** The stall watchdog: (re)armed by each frame; fires once until frames flow again. */
+  const watch = () => {
+    clearTimer(dog);
+    dog = undefined;
+    if (stallMs <= 0 || held || (state !== "listening" && state !== "capturing")) return;
+    const g = gen;
+    dog = setTimer(() => {
+      dog = undefined;
+      if (g === gen && !held && (state === "listening" || state === "capturing"))
+        d.onError?.(Object.assign(new Error(`mic stalled: no audio for ${Math.round(stallMs / 1000)} s`), { name: "MicStalledError" }));
+    }, stallMs);
+  };
   const set = (s: MicState) => {
     state = s;
+    if (s === "off") {
+      clearTimer(dog);
+      dog = undefined;
+    }
     d.onState(s);
   };
   const pending = () => d.onPending(q.pending(), q.interim());
@@ -484,7 +512,10 @@ export function createMic(d: {
       cap = setTimer(() => void vad?.flush(), MAX_UTTERANCE_MS);
     },
     onFrame(frame, prob) {
-      if (g !== gen || state !== "capturing") return;
+      if (g !== gen || held) return;
+      d.onFrameBeat?.(Date.now());
+      watch();
+      if (state !== "capturing") return;
       if (prob !== undefined) d.onProb?.(prob);
       live.push(frame);
       liveLen += frame.length;
@@ -574,6 +605,7 @@ export function createMic(d: {
     }
     if (g !== gen) return; // off() took this VAD while start() was pending
     set("listening");
+    watch();
   };
   async function off() {
     if (state === "off") return;
@@ -612,6 +644,7 @@ export function createMic(d: {
       dropCur();
       if (state === "capturing") set("listening");
     }
+    watch(); // held: no frames are expected; resumed: they are again
     const v = vad;
     if (v) ctl = ctl.then(() => (on ? v.pause() : v.start())).catch(() => {});
   }
