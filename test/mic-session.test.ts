@@ -605,8 +605,8 @@ describe("mic session: off while the VAD is still loading (deferred init)", () =
     const cur = s.stream();
     expect(cur).not.toBe(first);
     expect(cur?.getTracks().every((t) => t.readyState === "live")).toBe(true);
-    release = () => {};
     const end = s.off();
+    await new Promise((r) => setTimeout(r, 5));
     release();
     await end;
   });
