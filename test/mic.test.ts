@@ -834,6 +834,16 @@ describe("createMic: stall watchdog and frame heartbeat", () => {
     fire(h);
     expect(h.errors.length).toBe(1); // the live one is the newest: silence after the last frame
   });
+  it("frames after a stall call onRecover once; a stall note has its own string", async () => {
+    let rec = 0;
+    const h = harness({ onRecover: () => void rec++ });
+    await h.mic.toggle();
+    fire(h);
+    h.v.ev().onFrame?.(new Float32Array(160));
+    h.v.ev().onFrame?.(new Float32Array(160));
+    expect(rec).toBe(1);
+    expect(micErrorNote(h.errors[0])).toBe(MIC_ERROR_STRINGS_EN.stalled);
+  });
   it("held, off, or stallMs 0: no stall error", async () => {
     const a = harness();
     await a.mic.toggle();

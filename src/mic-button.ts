@@ -191,9 +191,10 @@ class NoStt extends Error {
 }
 
 /** The browser side of the page's session, made by the first element to connect. */
-function browserDeps(storageKey: string): MicDeps<MicConfig> {
+function browserDeps(storageKey: string, stallMs?: number): MicDeps<MicConfig> {
   const ss = () => globalThis.sessionStorage;
   return {
+    ...(stallMs !== undefined ? { stallMs } : {}),
     getStream: (c) => micStream(c?.aec ?? true),
     load: (ev, s, c) =>
       c?.vad ? sileroVad(ev, s as MediaStream, c.vad) : Promise.reject(new Error("no VAD source")),
@@ -341,6 +342,16 @@ export class MicElement extends Base {
   get storageKey(): string {
     return this.getAttribute("storage-key") || MIC_ON_KEY;
   }
+  /**
+   * Attribute stall-ms: no audio this long while listening shows the "stalled"
+   * note (default STALL_MS; 0 turns the check off). Read when the page's
+   * session is made (the first element to connect).
+   */
+  get stallMs(): number | undefined {
+    const v = this.getAttribute("stall-ms");
+    const n = v === null ? NaN : Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : undefined;
+  }
   set storageKey(v: string) {
     this.setAttribute("storage-key", v);
   }
@@ -432,7 +443,7 @@ export class MicElement extends Base {
       return;
     }
     this.build();
-    const s = (this._session = micSession(browserDeps(this.storageKey)));
+    const s = (this._session = micSession(browserDeps(this.storageKey, this.stallMs)));
     s.configure(this.config());
     if (this._voice !== undefined) s.setVoice(this._voice);
     this.off.push(

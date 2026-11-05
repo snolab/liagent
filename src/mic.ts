@@ -96,6 +96,8 @@ export type MicErrorStrings = {
   failed: string;
   /** `{message}` is replaced by the error's message. */
   other: string;
+  /** No audio from the mic for a while (MicStalledError); cleared when audio comes back. */
+  stalled: string;
 };
 export const MIC_ERROR_STRINGS_EN: MicErrorStrings = {
   denied: "Microphone permission denied",
@@ -104,6 +106,7 @@ export const MIC_ERROR_STRINGS_EN: MicErrorStrings = {
   tooMuch: "Too much speech for now; try again in a minute",
   failed: "Transcription failed ({status})",
   other: "Mic: {message}",
+  stalled: "The mic stopped sending audio",
 };
 
 /** The short note by the button for an error. */
@@ -115,6 +118,7 @@ export function micErrorNote(
   const n = nameOf(e);
   if (n === "NotAllowedError" || n === "SecurityError") return s.denied;
   if (n === "NotFoundError") return s.noMic;
+  if (n === "MicStalledError") return s.stalled;
   if (e instanceof SttError) {
     if (e.status === 401) return s.signIn;
     if (e.status === 429) return s.tooMuch;
@@ -402,6 +406,8 @@ export function createMic(d: {
   onProb?: (prob: number) => void;
   /** Rolling partial chunks for long utterances (on unless false). */
   partials?: boolean;
+  /** Frames flow again after a MicStalledError (the host clears that error). */
+  onRecover?: () => void;
   /** Every audio frame the VAD hands over while on (not held), with its time: a heartbeat. */
   onFrameBeat?: (at: number) => void;
   /**
@@ -439,6 +445,7 @@ export function createMic(d: {
 
   const stallMs = d.stallMs ?? STALL_MS;
   let dog: unknown;
+  let stalled = false;
   /** The stall watchdog: (re)armed by each frame; fires once until frames flow again. */
   const watch = () => {
     clearTimer(dog);
@@ -447,8 +454,10 @@ export function createMic(d: {
     const g = gen;
     dog = setTimer(() => {
       dog = undefined;
-      if (g === gen && !held && (state === "listening" || state === "capturing"))
+      if (g === gen && !held && (state === "listening" || state === "capturing")) {
+        stalled = true;
         d.onError?.(Object.assign(new Error(`mic stalled: no audio for ${Math.round(stallMs / 1000)} s`), { name: "MicStalledError" }));
+      }
     }, stallMs);
   };
   const set = (s: MicState) => {
@@ -456,6 +465,7 @@ export function createMic(d: {
     if (s === "off") {
       clearTimer(dog);
       dog = undefined;
+      stalled = false;
     }
     d.onState(s);
   };
@@ -514,6 +524,10 @@ export function createMic(d: {
     onFrame(frame, prob) {
       if (g !== gen || held) return;
       d.onFrameBeat?.(Date.now());
+      if (stalled) {
+        stalled = false;
+        d.onRecover?.();
+      }
       watch();
       if (state !== "capturing") return;
       if (prob !== undefined) d.onProb?.(prob);

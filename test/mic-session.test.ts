@@ -561,4 +561,24 @@ describe("mic session: off while the VAD is still loading (deferred init)", () =
     expect(s.view().state).toBe("off");
     expect(f.calls.stops).toBe(1);
   });
+  it("a stall error clears itself when audio comes back", async () => {
+    let ev: VadEvents | null = null;
+    const f = fakes();
+    const timers: (() => void)[] = [];
+    const load = f.deps.load;
+    f.deps.load = async (e, st, c) => {
+      ev = e;
+      return load(e, st, c);
+    };
+    f.deps.stallMs = 1;
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    await new Promise((r) => setTimeout(r, 20));
+    expect((s.view().error as Error | null)?.name).toBe("MicStalledError");
+    (ev as unknown as VadEvents).onFrame?.(new Float32Array(160));
+    expect(s.view().error).toBeNull();
+    expect(s.lastFrameAt()).toBeGreaterThan(0);
+    void timers;
+    await s.off();
+  });
 });
