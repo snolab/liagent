@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   MAX_UTTERANCE_MS,
+  STALL_MS,
   type MicState,
   PENDING_MARK,
   RATE,
@@ -801,5 +802,42 @@ describe("scheduleTick: the voice-send sound", () => {
     ]);
     expect(oscs[0]!.start).toBe(10);
     expect(oscs[1]!.start).toBeCloseTo(10.03);
+  });
+});
+
+describe("createMic: stall watchdog and frame heartbeat", () => {
+  const dogs = (h: ReturnType<typeof harness>) => h.timers.filter((t) => t.ms === STALL_MS);
+  const fire = (h: ReturnType<typeof harness>) => dogs(h).filter((t) => t.live).forEach((t) => t.f());
+  it("no frames while listening: one MicStalledError, the mic stays on", async () => {
+    const h = harness();
+    await h.mic.toggle();
+    fire(h);
+    expect(h.errors.map((e) => (e as Error).name)).toEqual(["MicStalledError"]);
+    expect(h.mic.state()).toBe("listening");
+    fire(h); // it does not re-arm by itself
+    expect(h.errors.length).toBe(1);
+  });
+  it("each frame beats and re-arms the watchdog", async () => {
+    const beats: number[] = [];
+    const h = harness({ onFrameBeat: (at) => beats.push(at) });
+    await h.mic.toggle();
+    h.v.ev().onFrame?.(new Float32Array(160));
+    h.v.ev().onFrame?.(new Float32Array(160));
+    expect(beats.length).toBe(2);
+    expect(dogs(h).filter((t) => t.live).length).toBe(1);
+    fire(h);
+    expect(h.errors.length).toBe(1); // the live one is the newest: silence after the last frame
+  });
+  it("held, off, or stallMs 0: no stall error", async () => {
+    const a = harness();
+    await a.mic.toggle();
+    a.mic.hold(true);
+    fire(a);
+    await a.mic.toggle();
+    fire(a);
+    expect(a.errors).toEqual([]);
+    const b = harness({ stallMs: 0 });
+    await b.mic.toggle();
+    expect(dogs(b).length).toBe(0);
   });
 });
