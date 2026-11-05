@@ -282,6 +282,10 @@ export function createMicSession<C = unknown>(
       sink?.onPending(n, interim);
     },
     onError: (e) => emit({ error: e }),
+    // Audio is back: a stall note goes (any other error stays until the next tap).
+    onRecover: () => {
+      if ((view.error as { name?: string } | null)?.name === "MicStalledError") emit({ error: null });
+    },
     onFrameBeat: (at) => {
       lastFrame = at;
       deps.onFrameBeat?.(at);
