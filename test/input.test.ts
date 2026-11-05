@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { afterChange, enterSends, lineBreakSends } from "../src/input.ts";
+import { afterChange, autoSend, enterSends, lineBreakSends } from "../src/input.ts";
 
 describe("enterSends", () => {
   test("plain Enter sends", () => {
@@ -53,5 +53,17 @@ describe("afterChange", () => {
   });
   test("nothing while composing", () => {
     expect(afterChange("スワイプを直してください。", 0, true)).toBe("idle");
+  });
+});
+
+describe("autoSend", () => {
+  it("a sentence jump sends when nothing holds the draft", () => {
+    expect(autoSend(afterChange("Hello there, how are you today.", 0, false), {})).toBe("send");
+  });
+  it("micActive, a partial or hold stop the jump-send and the debounce", () => {
+    for (const held of [{ mic: true }, { partial: true }, { hold: true }]) {
+      expect(autoSend("send", held)).toBe("idle");
+      expect(autoSend("arm", held)).toBe("idle");
+    }
   });
 });
