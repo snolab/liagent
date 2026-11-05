@@ -610,4 +610,60 @@ describe("mic session: off while the VAD is still loading (deferred init)", () =
     release();
     await end;
   });
+  const slow = (f: ReturnType<typeof fakes>) => {
+    const r = { release: () => {} };
+    const load = f.deps.load;
+    f.deps.load = async (ev, st, c) => ({
+      ...(await load(ev, st, c)),
+      destroy: () => new Promise<void>((done) => (r.release = done)),
+    });
+    return r;
+  };
+  const wait = () => new Promise((r) => setTimeout(r, 5));
+  it("an off() during teardown cancels a tap waiting on it: the mic stays off (closed window)", async () => {
+    const f = fakes();
+    const r = slow(f);
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    const a = s.off();
+    const tap = s.toggle(); // the user taps on during cleanup
+    const close = s.off(); // then the window closes
+    await wait();
+    r.release();
+    await Promise.all([a, tap, close]);
+    expect(s.view().state).toBe("off");
+    expect(f.calls.gum).toBe(1);
+    expect(s.stream()).toBeNull();
+  });
+  it("two taps during teardown collapse to the last intent (off)", async () => {
+    const f = fakes();
+    const r = slow(f);
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    const a = s.off();
+    const t1 = s.toggle();
+    const t2 = s.toggle();
+    await wait();
+    r.release();
+    await Promise.all([a, t1, t2]);
+    expect(s.view().state).toBe("off");
+    expect(f.calls.gum).toBe(1);
+  });
+  it("three taps during teardown end on", async () => {
+    const f = fakes();
+    const r = slow(f);
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    const a = s.off();
+    const taps = [s.toggle(), s.toggle(), s.toggle()];
+    await wait();
+    r.release();
+    await Promise.all([a, ...taps]);
+    expect(s.view().state).toBe("listening");
+    expect(f.calls.gum).toBe(2);
+    const end = s.off();
+    await wait();
+    r.release();
+    await end;
+  });
 });

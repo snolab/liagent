@@ -227,6 +227,9 @@ export function createMicSession<C = unknown>(
   let prev: MicState = "off";
   /** The explicit off's cleanup while it runs (shared by a second off; toggle and resume wait for it). */
   let teardown: Promise<void> | null = null;
+  /** Taps during a teardown: the intent they add up to, and a counter so only the last one acts. */
+  let intent: "on" | "off" | null = null;
+  let taps = 0;
   /** The last audio frame's time (0: none yet). */
   let lastFrame = 0;
   const mic = createMic({
@@ -347,8 +350,21 @@ export function createMicSession<C = unknown>(
     /** A tap: on (remembered for a reload), or an explicit off. */
     async toggle() {
       emit({ error: null });
-      // A tap during an off's teardown waits for it: a new on gets a new stream, never the dying one.
-      if (teardown) await teardown;
+      // Taps during an off's teardown collapse to the last intent, applied once it ends (a new
+      // stream, never the dying one); an off() meanwhile cancels them (a closed window stays off).
+      if (teardown) {
+        intent = intent === "on" ? "off" : "on";
+        const my = ++taps;
+        await teardown;
+        if (my !== taps) return; // a later tap or an off() decides
+        const want = intent;
+        intent = null;
+        if (want === "on" && mic.state() === "off") {
+          store.on();
+          await mic.toggle();
+        }
+        return;
+      }
       if (mic.state() === "off") {
         store.on();
         await mic.toggle();
@@ -357,6 +373,9 @@ export function createMicSession<C = unknown>(
     /** The explicit off: the VAD, the stream and the reload flag all go. */
     async off() {
       offs++;
+      // Any tap still waiting is cancelled: off wins.
+      taps++;
+      intent = null;
       // One teardown at a time: a second off() shares the first one's promise.
       if (teardown) return teardown;
       store.clear();
