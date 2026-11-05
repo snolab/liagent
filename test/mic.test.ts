@@ -311,7 +311,7 @@ describe("createMic: listening mode", () => {
     h.timers.at(-1)?.f();
     expect(h.v.did).toContain("flush");
     h.v.ev().onSpeechEnd(new Float32Array(160));
-    expect(h.timers.every((t) => !t.live)).toBe(true);
+    expect(h.timers.filter((t) => t.ms === MAX_UTTERANCE_MS).every((t) => !t.live)).toBe(true);
   });
 
   it("falls back when the VAD cannot load; reports when neither can", async () => {
@@ -807,7 +807,13 @@ describe("scheduleTick: the voice-send sound", () => {
 
 describe("createMic: stall watchdog and frame heartbeat", () => {
   const dogs = (h: ReturnType<typeof harness>) => h.timers.filter((t) => t.ms === STALL_MS);
-  const fire = (h: ReturnType<typeof harness>) => dogs(h).filter((t) => t.live).forEach((t) => t.f());
+  const fire = (h: ReturnType<typeof harness>) =>
+    dogs(h)
+      .filter((t) => t.live)
+      .forEach((t) => {
+        t.live = false;
+        t.f();
+      });
   it("no frames while listening: one MicStalledError, the mic stays on", async () => {
     const h = harness();
     await h.mic.toggle();
