@@ -428,6 +428,15 @@ name from a visually hidden span instead.
   (read once, when attached).
 - `mic-active`: the same as `micActive` (watched).
 - `mic-placement`, `tree-placement`: the same as the properties (watched).
+- `keep-scroll`: the box keeps where the log is scrolled (under its
+  `storage-key`, in localStorage) and goes back there after a reload, or to
+  the newest line if that line is gone. Without it, the log opens at its
+  newest line. For your own storage use `box.scrollState` instead: read it
+  (or listen for the `scroll-state` event, detail: the state, after the
+  user's own scrolling), and set it after a reload. The state is `null` at
+  the newest line, else `{ id, dy }`: the message id of the top line and
+  how many px of it are scrolled past, so new lines do not move it. A set
+  waits until that line is rendered and the log is shown.
 - `all-pages` (property `allPages`, watched): your hub widens code grants to
   every page of the user. A code request then says "on all your pages,
   including pages opened later", Allow sends `pages: "all"`, and no page

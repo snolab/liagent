@@ -273,6 +273,11 @@ export {
 
 export type AnswerType = "allow" | "deny";
 /**
+ * Where the log is scrolled: null at its newest line, else the line at its
+ * top (by message id) and how many px of that line are scrolled past.
+ */
+export type ScrollState = { id: string; dy: number } | null;
+/**
  * What the user chose in a pairing request: the pages to allow (their ids,
  * or "all", including pages that open later), and — for an older agent that
  * did not say which scope it wants — "chat" when they tapped the 30-day chat
@@ -886,6 +891,9 @@ export class ChatBox extends Base {
   private fileList: { data?: FilesListing; failed?: boolean; asking?: string } = {};
   /** The log's re-pin scrolled it (its own scroll event is not the user's). */
   private ownPin = false;
+  /** A scroll position to restore once its line is rendered and laid out (scrollState, keep-scroll). */
+  private restoreTo?: ScrollState;
+  private saveTimer?: ReturnType<typeof setTimeout>;
 
   private root?: ShadowRoot;
   private open = true;
@@ -1394,6 +1402,12 @@ export class ChatBox extends Base {
     if (userName && !this._user.name) this._user.name = userName;
     this._micActive = this.hasAttribute("mic-active");
     this._hold = this.hasAttribute("hold");
+    if (this.hasAttribute("keep-scroll")) {
+      try {
+        const v = JSON.parse(this.read("scroll") ?? "null") as ScrollState;
+        if (v && typeof v.id === "string" && Number.isFinite(v.dy)) this.restoreTo = v;
+      } catch {}
+    }
     this._allPages = this.hasAttribute("all-pages");
     const o = this.read("open");
     this.open = o === null ? this._defaultOpen : o === "1";
@@ -1888,7 +1902,10 @@ export class ChatBox extends Base {
 
     this.treeGestures(treebtn);
 
-    column.addEventListener("scroll", () => this.onColumnScroll());
+    column.addEventListener("scroll", () => {
+      this.onColumnScroll();
+      if (Date.now() - this.userScrollAt < USER_SCROLL_MS) this.scrolledByUser();
+    });
     const userScroll = () => {
       this.userScrollAt = Date.now();
       this.ownPin = false;
@@ -1965,7 +1982,10 @@ export class ChatBox extends Base {
             if (ta.clientWidth === width) continue;
             width = ta.clientWidth;
             this.fitInput();
-          } else if (e.target === column || e.target === this.els.log) this.repin();
+          } else if (e.target === column || e.target === this.els.log) {
+            if (this.restoreTo !== undefined) this.tryRestore();
+            else this.repin();
+          }
           else this.placeFloat();
         }
       });
@@ -2873,6 +2893,7 @@ export class ChatBox extends Base {
     for (const m of this._messages) {
       const li = document.createElement("li");
       li.dataset.from = m.from;
+      li.dataset.id = m.id;
       const who = lineAvatar(m, {
         friend: this._friend,
         user: this._user,
@@ -2910,9 +2931,73 @@ export class ChatBox extends Base {
       li.append(av, text);
       log.append(li);
     }
-    if (this.open && this.atEnd) this.toEnd();
+    if (this.restoreTo !== undefined) this.tryRestore();
+    else if (this.open && this.atEnd) this.toEnd();
     this.onColumnScroll();
     this.renderStatus();
+  }
+
+  /**
+   * Where the log is scrolled (ScrollState): read it to keep it in your own
+   * storage, set it to go back there (it waits until that line is rendered
+   * and the log is shown; a line that is gone leaves the log at its end).
+   * With the keep-scroll attribute the box keeps it itself, under its
+   * storage-key. A "scroll-state" event (detail: the state) follows the
+   * user's own scrolling.
+   */
+  get scrollState(): ScrollState {
+    if (this.restoreTo !== undefined) return this.restoreTo;
+    const c = this.els.column;
+    if (!c || !c.clientHeight || this.atEnd) return null;
+    const top = c.getBoundingClientRect().top;
+    for (const li of this.els.log!.querySelectorAll<HTMLElement>("li[data-id]")) {
+      const r = li.getBoundingClientRect();
+      if (r.bottom > top) return { id: li.dataset.id!, dy: Math.round(top - r.top) };
+    }
+    return null;
+  }
+  set scrollState(v: ScrollState) {
+    if (v === null) {
+      this.restoreTo = undefined;
+      this.atEnd = true;
+      this.toEnd();
+      return;
+    }
+    if (!v || typeof v.id !== "string" || !Number.isFinite(v.dy)) return;
+    this.restoreTo = { id: v.id, dy: v.dy };
+    this.tryRestore();
+  }
+  /** Go to restoreTo if its line is there and the log is laid out; drop it if the line is gone. */
+  private tryRestore() {
+    const want = this.restoreTo;
+    const c = this.els.column;
+    if (!want || !c || !this.open || !c.clientHeight) return;
+    const li = [...this.els.log!.querySelectorAll<HTMLElement>("li[data-id]")].find(
+      (x) => x.dataset.id === want.id,
+    );
+    if (!li) {
+      // History is in and the line is not: it is gone, so the newest line it is.
+      if (this._messages.length) {
+        this.restoreTo = undefined;
+        this.toEnd();
+      }
+      return;
+    }
+    this.restoreTo = undefined;
+    this.atEnd = false;
+    this.ownPin = false;
+    c.scrollTop += li.getBoundingClientRect().top - c.getBoundingClientRect().top + want.dy;
+    this.onColumnScroll();
+  }
+  /** The user scrolled: a pending restore is moot; keep and announce the new position. */
+  private scrolledByUser() {
+    this.restoreTo = undefined;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => {
+      const v = this.scrollState;
+      if (this.hasAttribute("keep-scroll")) this.write("scroll", JSON.stringify(v));
+      this.dispatchEvent(new CustomEvent("scroll-state", { detail: v }));
+    }, 200);
   }
   private toEnd() {
     const c = this.els.column;
