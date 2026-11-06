@@ -180,7 +180,11 @@ export async function sileroVad(ev: VadEvents, stream: MediaStream, src: VadSour
       } catch {
         // vad-web 0.0.31 throws in getAudioInstances() before model.release() when it never
         // started (closed while loading): release the ONNX session ourselves so it does not leak.
-        const raw = v as unknown as { model?: { release?: () => unknown }; ownsAudioContext?: boolean; _audioContext?: { close?: () => unknown } | null };
+        const raw = v as unknown as {
+          model?: { release?: () => unknown };
+          ownsAudioContext?: boolean;
+          _audioContext?: { close?: () => unknown } | null;
+        };
         try {
           await raw.model?.release?.();
         } catch {}

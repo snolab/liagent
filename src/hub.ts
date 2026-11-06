@@ -914,7 +914,8 @@ export class ChatHub {
       preapproved: true,
     });
     for (const c of this.sockets("controller"))
-      if (c.a.grant === hash) c.ws.serializeAttachment({ ...c.a, until, scope: "eval", pages } satisfies ControllerAtt);
+      if (c.a.grant === hash)
+        c.ws.serializeAttachment({ ...c.a, until, scope: "eval", pages } satisfies ControllerAtt);
     log({ msg: "chat.preapprove", label: o.label, until });
     this.broadcast();
     return { until };

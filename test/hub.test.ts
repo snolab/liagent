@@ -1840,7 +1840,9 @@ describe("preapprove: the host vouches for its own agent (HubOptions.preapproved
   const KEY = "k".repeat(40);
   it("is off by default, and needs eval", async () => {
     expect(await setup().hub.preapprove(KEY, { label: "router" })).toBeNull();
-    expect(await setup({ preapprovedEval: true }).hub.preapprove(KEY, { label: "router" })).toBeNull();
+    expect(
+      await setup({ preapprovedEval: true }).hub.preapprove(KEY, { label: "router" }),
+    ).toBeNull();
   });
   it("an agent knocking with the preapproved token resumes eval on all pages, with no pairing", async () => {
     const s = setup({ eval: true, preapprovedEval: true });

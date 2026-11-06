@@ -53,5 +53,9 @@ export function atEndAfter(d: {
   userScrolled: boolean;
 }): boolean {
   if (!d.clientHeight) return d.atEnd;
-  return stillAtEnd({ gap: d.gap, ownPin: d.atEnd && !d.userScrolled, userScrolled: d.userScrolled });
+  return stillAtEnd({
+    gap: d.gap,
+    ownPin: d.atEnd && !d.userScrolled,
+    userScrolled: d.userScrolled,
+  });
 }

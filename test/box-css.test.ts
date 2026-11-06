@@ -7,7 +7,9 @@ const src = readFileSync(new URL("../src/box.ts", import.meta.url), "utf8");
 
 describe("box CSS", () => {
   it("has no font shorthand mixed with inherit", () => {
-    expect(src).not.toMatch(/font:\s*[^;`]*\binherit\b[^;`]*\S\s+inherit|font:\s*\d[^;`]*\binherit\b/);
+    expect(src).not.toMatch(
+      /font:\s*[^;`]*\binherit\b[^;`]*\S\s+inherit|font:\s*\d[^;`]*\binherit\b/,
+    );
   });
   it("gives the text inputs a 16px font (no iOS focus zoom)", () => {
     expect((src.match(/font-size: 16px;/g) ?? []).length).toBeGreaterThanOrEqual(2);
