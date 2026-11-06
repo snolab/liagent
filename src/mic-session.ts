@@ -397,6 +397,23 @@ export function createMicSession<C = unknown>(
       });
       return teardown;
     },
+    /**
+     * Retry (no audio): off, then on again once the cleanup is done, on a new
+     * stream. The pending "on" is not a tap: any tap meanwhile cancels it and
+     * counts as if there had been no retry, from off (1 tap ends on, 2 end
+     * off); an off() (a closed window) cancels it and stays off.
+     */
+    async retry() {
+      emit({ error: null });
+      const done = session.off();
+      const my = ++taps;
+      await done;
+      if (my !== taps) return; // a tap or an off() since decides
+      if (mic.state() === "off") {
+        store.on();
+        await mic.toggle();
+      }
+    },
     hold: (on: boolean) => mic.hold(on),
     /** When the last audio frame arrived (ms since epoch; 0 if none): a heartbeat to poll. */
     lastFrameAt: () => lastFrame,
