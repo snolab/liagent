@@ -517,7 +517,7 @@ img.av { display: block; object-fit: cover; }
 .min .slot { opacity: 0; max-height: 2rem; overflow: hidden; }
 textarea {
   pointer-events: auto; display: block; flex: 1; min-width: 0; resize: none; margin: 0; align-self: flex-end;
-  font: 16px/1.35 inherit; font-family: inherit; color: inherit; height: var(--control); min-height: var(--control); max-height: ${INPUT_MAX_PX}px;
+  font-size: 16px; line-height: 1.35; font-family: inherit; color: inherit; height: var(--control); min-height: var(--control); max-height: ${INPUT_MAX_PX}px;
   padding: 4px 8px; border: 1px solid transparent; background: transparent; outline: none;
   overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
 }
@@ -525,7 +525,7 @@ textarea.pe { padding-inline-end: 24px; }
 textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent); }
 .mirror {
   pointer-events: none; position: absolute; inset: 0; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere;
-  border: 1px solid transparent; padding: 4px 8px; font: 16px/1.35 inherit; font-family: inherit;
+  border: 1px solid transparent; padding: 4px 8px; font-size: 16px; line-height: 1.35; font-family: inherit;
 }
 .mirror .ghost { visibility: hidden; }
 .mirror .partial { color: var(--muted); }
