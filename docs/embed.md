@@ -428,6 +428,10 @@ name from a visually hidden span instead.
   (read once, when attached).
 - `mic-active`: the same as `micActive` (watched).
 - `mic-placement`, `tree-placement`: the same as the properties (watched).
+- `all-pages` (property `allPages`, watched): your hub widens code grants to
+  every page of the user. A code request then says "on all your pages,
+  including pages opened later", Allow sends `pages: "all"`, and no page
+  ticks are shown.
 
 **Theming** (CSS custom properties on the element):
 
@@ -729,6 +733,16 @@ hosts that read aloud some other way. An older version kept a per-device
 - **Eval is off by default** on both ends: the hub needs `chatHub({ eval: true })`,
   and `connectHub` needs `evalCode: true`. With both on, an approved agent
   runs arbitrary code in the pages the user allowed. Keep it to debug sessions.
+- **Preapproved eval** (`chatHub({ eval: true, preapprovedEval: true })`, off
+  by default): the host calls `hub.preapprove(token, { label, ms?, pages? })`
+  from its own Durable Object code, and an agent knocking with that token
+  (`x-liagent-token`) resumes the owner's eval grant with no pairing code and
+  no 8-hour re-approval. liagent cannot tell who holds a token: call it only
+  for an agent you authenticated yourself (a key of at least 32 characters,
+  never from a page), for your own signed-in owner. The grant lasts `ms`
+  (8 hours by default, 30 days at most); call it again to extend it. The
+  user's End still revokes it and it stays ended until you pass `force: true`;
+  `hub.unapprove(token)` ends it from the host (for example on a key change).
 - **CSP:** a hosted `liagent.js` needs its origin in `script-src`, and the
   hub's socket needs it in `connect-src`. The box styles its shadow root with
   a constructed stylesheet (`adoptedStyleSheets`), which `style-src` does not

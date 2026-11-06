@@ -77,7 +77,7 @@ function fakeStorage(
   };
 }
 
-function setup() {
+function setup(opts: ConstructorParameters<typeof ChatHub>[3] = { eval: true }) {
   const sockets: FakeSocket[] = [];
   let t = 1_000_000;
   const storage = fakeStorage();
@@ -89,7 +89,7 @@ function setup() {
     },
     undefined,
     () => t,
-    { eval: true },
+    opts,
   );
   const page = (label = "/words pwa iPhone", id?: string) => {
     const ws = new FakeSocket();
@@ -1833,5 +1833,52 @@ describe("ChatHub agent edits of voice messages", () => {
     await s.msg(owner, voice("v1", "hi"));
     await s.msg(ws, { type: "edit", id: "v1", text: "Hi." });
     expect((owner.last("edited") as { edited: { by: string } }).edited.by).toBe("chat-lane");
+  });
+});
+
+describe("preapprove: the host vouches for its own agent (HubOptions.preapprovedEval)", () => {
+  const KEY = "k".repeat(40);
+  it("is off by default, and needs eval", async () => {
+    expect(await setup().hub.preapprove(KEY, { label: "router" })).toBeNull();
+    expect(await setup({ preapprovedEval: true }).hub.preapprove(KEY, { label: "router" })).toBeNull();
+  });
+  it("an agent knocking with the preapproved token resumes eval on all pages, with no pairing", async () => {
+    const s = setup({ eval: true, preapprovedEval: true });
+    const p = s.page();
+    expect(await s.hub.preapprove(KEY, { label: "router", ms: 30 * 24 * 3600_000 })).toEqual({
+      until: 1_000_000 + 30 * 24 * 3600_000,
+    });
+    const c = await s.resume(KEY);
+    expect(c.last("approved")).toMatchObject({ scope: "eval", pages: "all", resumed: true });
+    expect(p.last("pending")).toBeUndefined();
+    await s.msg(c, { type: "eval", code: "1" });
+    expect(p.last("eval")).toBeTruthy();
+  });
+  it("refuses a short token and caps the life at PREAPPROVE_MAX_MS", async () => {
+    const s = setup({ eval: true, preapprovedEval: true });
+    await expect(s.hub.preapprove("short", { label: "x" })).rejects.toThrow();
+    const r = await s.hub.preapprove(KEY, { label: "x", ms: 1e15 });
+    expect(r!.until).toBe(1_000_000 + 30 * 24 * 60 * 60_000);
+  });
+  it("End by the user sticks: the host cannot just put it back without force", async () => {
+    const s = setup({ eval: true, preapprovedEval: true });
+    const p = s.page();
+    await s.hub.preapprove(KEY, { label: "router" });
+    const c = await s.resume(KEY);
+    const pair = (p.last("state") as { sessions: { pair: string }[] }).sessions[0]!.pair;
+    await s.msg(p, { type: "revoke", pair });
+    expect(c.closed).toBe(4401);
+    expect(await s.hub.preapprove(KEY, { label: "router" })).toBeNull();
+    const gone = await s.resume(KEY);
+    expect(gone.closed).toBe(4498);
+    expect(await s.hub.preapprove(KEY, { label: "router", force: true })).not.toBeNull();
+  });
+  it("unapprove closes the agents holding it", async () => {
+    const s = setup({ eval: true, preapprovedEval: true });
+    await s.hub.preapprove(KEY, { label: "router" });
+    const c = await s.resume(KEY);
+    await s.hub.unapprove(KEY);
+    expect(c.closed).toBe(4401);
+    expect((await s.resume(KEY)).closed).toBe(4498);
   });
 });

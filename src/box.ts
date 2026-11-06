@@ -785,7 +785,7 @@ type FloatLife = ReturnType<typeof createFloatLife>;
 /** The chat box element. Plain properties in, callbacks out; see the file header. */
 export class ChatBox extends Base {
   static get observedAttributes() {
-    return ["mic-active", "hold", "mic-placement", "tree-placement"];
+    return ["mic-active", "hold", "mic-placement", "tree-placement", "all-pages"];
   }
   /**
    * Called with each draft that goes out, and the state-tree node it is
@@ -898,6 +898,7 @@ export class ChatBox extends Base {
   private _partial = "";
   private _micActive = false;
   private _hold = false;
+  private _allPages = false;
   /** The input has focus: the log opens. */
   private typing = false;
   /** The mark is held: the input shows how to use it. */
@@ -1260,10 +1261,28 @@ export class ChatBox extends Base {
     if (typeof this.toggleAttribute === "function") this.toggleAttribute("hold", !!v);
     else this.applyHold(!!v);
   }
+  /**
+   * The host grants code on every page of this user (its hub widens Allow to
+   * "all"): the request says so, Allow sends pages "all", and no page ticks
+   * are shown. Attribute: all-pages.
+   */
+  get allPages() {
+    return this._allPages;
+  }
+  set allPages(v: boolean) {
+    if (typeof this.toggleAttribute === "function") this.toggleAttribute("all-pages", !!v);
+    else this.applyAllPages(!!v);
+  }
   attributeChangedCallback(name: string) {
     if (name === "mic-active") this.applyMic(this.hasAttribute("mic-active"));
     else if (name === "hold") this.applyHold(this.hasAttribute("hold"));
+    else if (name === "all-pages") this.applyAllPages(this.hasAttribute("all-pages"));
     else this.renderActions();
+  }
+  private applyAllPages(v: boolean) {
+    if (v === this._allPages) return;
+    this._allPages = v;
+    this.renderAsks();
   }
   private applyHold(v: boolean) {
     if (v === this._hold) return;
@@ -1375,6 +1394,7 @@ export class ChatBox extends Base {
     if (userName && !this._user.name) this._user.name = userName;
     this._micActive = this.hasAttribute("mic-active");
     this._hold = this.hasAttribute("hold");
+    this._allPages = this.hasAttribute("all-pages");
     const o = this.read("open");
     this.open = o === null ? this._defaultOpen : o === "1";
     this.wasOpen = this.open;
@@ -2670,10 +2690,13 @@ export class ChatBox extends Base {
     const ask = document.createElement("span");
     ask.className = "ask";
     ask.setAttribute("role", "alertdialog");
+    // The host widens code to every page (all-pages): say so, not "chosen".
+    const all = this._allPages && !this._friend;
+    const where = all ? "on all your pages, including pages opened later," : "on the chosen pages";
     const what = this._friend
-      ? "to run code on the chosen pages, for 1 hour"
+      ? `to run code ${where} for 1 hour`
       : p.scope === "eval"
-        ? "to run code on the chosen pages and chat, for 8 hours"
+        ? `to run code ${where} and chat, for 8 hours`
         : p.scope === "chat"
           ? "to chat with you, for 30 days"
           : "to run code on your pages, or to chat";
@@ -2697,6 +2720,7 @@ export class ChatBox extends Base {
     if (!this.picked.has(p.pair)) this.picked.set(p.pair, new Set(this._self ? [this._self] : []));
     const picked = this.picked.get(p.pair)!;
     const pages = (): Answer["pages"] => {
+      if (all) return "all";
       const cur = this.picked.get(p.pair);
       if (cur === "all") return "all";
       return cur && cur.size ? [...cur] : undefined;
@@ -2712,11 +2736,11 @@ export class ChatBox extends Base {
       ask.append(b);
     };
     if (p.scope || this._friend)
-      btn("y", "Allow", "Allow on the ticked pages", () =>
+      btn("y", "Allow", all ? "Allow on all your pages, including pages opened later" : "Allow on the ticked pages", () =>
         this.onAnswer?.("allow", p, { pages: pages() }),
       );
     else {
-      btn("y", "8h", "Allow code and chat for 8 hours", () =>
+      btn("y", "8h", all ? "Allow code on all your pages and chat, for 8 hours" : "Allow code and chat for 8 hours", () =>
         this.onAnswer?.("allow", p, { pages: pages() }),
       );
       btn("c", "chat", "Chat only, for 30 days", () =>
@@ -2726,7 +2750,7 @@ export class ChatBox extends Base {
     btn("n", "✕", "Deny", () => this.onAnswer?.("deny", p, {}));
     // Chat always covers every page: only code (eval, or an older agent's
     // hour) asks which pages.
-    if (this._pages.length < 2 || (p.scope === "chat" && !this._friend)) return ask;
+    if (all || this._pages.length < 2 || (p.scope === "chat" && !this._friend)) return ask;
     const wrap = document.createElement("div");
     wrap.className = "askwrap";
     const list = document.createElement("div");
@@ -2740,11 +2764,11 @@ export class ChatBox extends Base {
       l.append(c, document.createTextNode(label));
       list.append(l);
     };
-    const all = picked === "all";
+    const allTicked = picked === "all";
     for (const pg of this._pages)
       box(
         `${pageHint(pg.label)}${pg.id === this._self ? " (this page)" : ""}`,
-        all || (picked as Set<string>).has(pg.id),
+        allTicked || (picked as Set<string>).has(pg.id),
         (v) => {
           const cur = this.picked.get(p.pair);
           const set = cur === "all" ? new Set(this._pages.map((x) => x.id)) : new Set(cur);
@@ -2754,7 +2778,7 @@ export class ChatBox extends Base {
           this.renderAsks();
         },
       );
-    box("all pages, and pages opened later", all, (v) => {
+    box("all pages, and pages opened later", allTicked, (v) => {
       this.picked.set(p.pair, v ? "all" : new Set(this._self ? [this._self] : []));
       this.renderAsks();
     });
