@@ -165,6 +165,13 @@ export type HubOptions = {
    * the user and their friends wrote.
    */
   logContent?: boolean;
+  /**
+   * Let the host preapprove eval (`ChatHub.preapprove`): an agent the host
+   * itself authenticated (its own key, never a page) gets the owner's eval
+   * grant with no pairing code and no 8-hour re-approval. Needs `eval`.
+   * Default false. The host decides who: only its own signed-in user.
+   */
+  preapprovedEval?: boolean;
 };
 
 export type Socket = {
@@ -233,7 +240,19 @@ type ControllerAtt = {
  * (older grants). `pages`: the page ids an eval grant covers. `at`: when it
  * was allowed.
  */
-type Grant = { label: string; until: number; pages?: string[] | "all"; scope?: Scope; at?: number };
+type Grant = {
+  label: string;
+  until: number;
+  pages?: string[] | "all";
+  scope?: Scope;
+  at?: number;
+  /** Stored by ChatHub.preapprove: End marks it, so the host does not just put it back. */
+  preapproved?: boolean;
+};
+/** ChatHub.preapprove's token: at least this long (a host key, not a short code). */
+export const PREAPPROVE_TOKEN_MIN = 32;
+/** ChatHub.preapprove's longest grant (the host extends it as it likes). */
+export const PREAPPROVE_MAX_MS = 30 * 24 * 60 * 60_000;
 /** A sleeping eval grant's pair id in the pages' state: "g:" + the start of its hash. */
 const DORMANT = "g:";
 const dormantPair = (hash: string) => `${DORMANT}${hash.slice(0, 40)}`;
@@ -323,6 +342,7 @@ export class ChatHub {
     friendChatMax: 30,
     friendWindowMs: 10 * 60_000,
     logContent: false,
+    preapprovedEval: false,
   };
 
   /** `{head}` for a log line, only when the hub logs content. */
@@ -421,6 +441,25 @@ export class ChatHub {
     await this.loadGrants();
     await this.ctx.storage.put(`grant:${hash}`, g);
     this.grants?.set(hash, g);
+  }
+
+  /** The user ended a grant: a preapproved one stays ended (ChatHub.preapprove `force`). */
+  private async endGrant(hash: string) {
+    await this.loadGrants();
+    if (this.grants?.get(hash)?.preapproved)
+      await this.ctx.storage.put(`preapproved-ended:${hash}`, this.now());
+    await this.dropGrant(hash);
+  }
+
+  /** The host ended a grant (ChatHub.unapprove): close what holds it and drop it. */
+  private async revokeHash(hash: string) {
+    for (const c of this.sockets("controller"))
+      if (c.a.grant === hash) {
+        send(c.ws, { type: "revoked" });
+        close(c.ws, 4401, "revoke");
+      }
+    await this.dropGrant(hash);
+    this.broadcast();
   }
 
   private async dropGrant(hash: string) {
@@ -839,6 +878,54 @@ export class ChatHub {
     return null;
   }
 
+  /**
+   * Preapprove eval (HubOptions.preapprovedEval, with eval): store the owner's
+   * eval grant for `token`, as Allow would, so an agent knocking with that
+   * token (x-liagent-token) resumes it with no prompt. Call it from the host
+   * only, after it has authenticated the agent (its own key) for its own
+   * signed-in owner: liagent cannot tell who holds a token. `ms` (default
+   * EVAL_GRANT_MS, at most PREAPPROVE_MAX_MS) is the grant's life; calling it
+   * again extends it, also on sockets already holding it. End still revokes
+   * it, and a revoked grant is not preapproved again until `force`.
+   * Returns its expiry, or null when the hub does not allow it.
+   */
+  async preapprove(
+    token: string,
+    o: { label: string; ms?: number; pages?: string[] | "all"; force?: boolean },
+  ): Promise<{ until: number } | null> {
+    if (!this.opts.eval || !this.opts.preapprovedEval) return null;
+    if (typeof token !== "string" || token.length < PREAPPROVE_TOKEN_MIN || token.length > 256)
+      throw new Error(`preapprove: the token must be ${PREAPPROVE_TOKEN_MIN} to 256 characters`);
+    const t = this.now();
+    const ms = Math.min(Math.max(o.ms ?? EVAL_GRANT_MS, 60_000), PREAPPROVE_MAX_MS);
+    const hash = await hashToken(token);
+    const ended = await this.ctx.storage.get<number>(`preapproved-ended:${hash}`);
+    if (ended && !o.force) return null;
+    if (o.force) await this.ctx.storage.delete(`preapproved-ended:${hash}`);
+    const prev = await this.ctx.storage.get<Grant>(`grant:${hash}`);
+    const pages = o.pages ?? prev?.pages ?? "all";
+    const until = t + ms;
+    await this.putGrant(hash, {
+      label: cleanLabel(o.label, 80) || "agent",
+      until,
+      scope: "eval",
+      pages,
+      at: prev?.at ?? t,
+      preapproved: true,
+    });
+    for (const c of this.sockets("controller"))
+      if (c.a.grant === hash) c.ws.serializeAttachment({ ...c.a, until, scope: "eval", pages } satisfies ControllerAtt);
+    log({ msg: "chat.preapprove", label: o.label, until });
+    this.broadcast();
+    return { until };
+  }
+
+  /** End a preapproved grant for `token` (the host dropped or changed its key). */
+  async unapprove(token: string): Promise<void> {
+    const hash = await hashToken(token.slice(0, 256));
+    await this.revokeHash(hash);
+  }
+
   /** An eval pairing on one friend's pages: the owner's agent asks, the friend answers. */
   private async pairForFriend(
     ws: Socket,
@@ -1136,7 +1223,7 @@ export class ChatHub {
       return send(ws, this.state(page.thread, undefined, page.id));
     const [hash, g] = found;
     if (m.type === "revoke") {
-      await this.dropGrant(hash);
+      await this.endGrant(hash);
       // Nothing should hold it (it was listed as asleep), but close any that does.
       for (const c of this.sockets("controller"))
         if (c.a.grant === hash) {
@@ -1227,7 +1314,7 @@ export class ChatHub {
     }
     log({ msg: `chat.${kind}`, pair: a.pair, label: a.label });
     if (!a.grant) return this.broadcast(ws);
-    return this.dropGrant(a.grant).then(() => this.broadcast(ws));
+    return this.endGrant(a.grant).then(() => this.broadcast(ws));
   }
 
   /** Where an agent's `say` goes: the owner's thread, or a friend's by user id or email. */
