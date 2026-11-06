@@ -2706,12 +2706,20 @@ export class ChatBox extends Base {
       ask.append(b);
     };
     if (p.scope || this._friend)
-      btn("y", "Allow", all ? "Allow on all your pages, including pages opened later" : "Allow on the ticked pages", () =>
-        this.onAnswer?.("allow", p, { pages: pages() }),
+      btn(
+        "y",
+        "Allow",
+        all ? "Allow on all your pages, including pages opened later" : "Allow on the ticked pages",
+        () => this.onAnswer?.("allow", p, { pages: pages() }),
       );
     else {
-      btn("y", "8h", all ? "Allow code on all your pages and chat, for 8 hours" : "Allow code and chat for 8 hours", () =>
-        this.onAnswer?.("allow", p, { pages: pages() }),
+      btn(
+        "y",
+        "8h",
+        all
+          ? "Allow code on all your pages and chat, for 8 hours"
+          : "Allow code and chat for 8 hours",
+        () => this.onAnswer?.("allow", p, { pages: pages() }),
       );
       btn("c", "chat", "Chat only, for 30 days", () =>
         this.onAnswer?.("allow", p, { pages: pages(), scope: "chat" }),
