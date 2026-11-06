@@ -922,7 +922,15 @@ export class ChatHub {
 
   /** End a preapproved grant for `token` (the host dropped or changed its key). */
   async unapprove(token: string): Promise<void> {
-    const hash = await hashToken(token.slice(0, 256));
+    await this.unapproveHash(await hashToken(token.slice(0, 256)));
+  }
+
+  /**
+   * End a grant by its hash (`hashToken(token)`, 64 hex), for a host that keeps
+   * only the hash of its old key: closes the agents holding it and drops it.
+   */
+  async unapproveHash(hash: string): Promise<void> {
+    if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error("unapproveHash: expected a 64-hex SHA-256");
     await this.revokeHash(hash);
   }
 

@@ -1881,4 +1881,13 @@ describe("preapprove: the host vouches for its own agent (HubOptions.preapproved
     expect(c.closed).toBe(4401);
     expect((await s.resume(KEY)).closed).toBe(4498);
   });
+  it("unapproveHash ends it by the key's hash, and refuses anything else", async () => {
+    const s = setup({ eval: true, preapprovedEval: true });
+    await s.hub.preapprove(KEY, { label: "router" });
+    const c = await s.resume(KEY);
+    await expect(s.hub.unapproveHash("grant:abc")).rejects.toThrow();
+    await s.hub.unapproveHash(await hashToken(KEY));
+    expect(c.closed).toBe(4401);
+    expect((await s.resume(KEY)).closed).toBe(4498);
+  });
 });
