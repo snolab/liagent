@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { repinEnd, stillAtEnd } from "../src/log-pin.ts";
+import { atEndAfter, repinEnd, stillAtEnd } from "../src/log-pin.ts";
 import { createPageAudio } from "../src/page-audio.ts";
 import {
   AEC_EVENT,
@@ -111,5 +111,23 @@ describe("echo cancellation switch", () => {
       globalThis.removeEventListener(AEC_EVENT, on);
       g.localStorage = had;
     }
+  });
+});
+
+describe("atEndAfter: only the user's scroll leaves the end", () => {
+  it("a log rebuilt or resized without user input stays at its end", () => {
+    // After a refresh: the history renders, the log is rebuilt (scrollTop clamped to 0).
+    expect(atEndAfter({ atEnd: true, gap: 900, clientHeight: 300, userScrolled: false })).toBe(true);
+  });
+  it("a hidden log (not laid out) keeps what it had", () => {
+    expect(atEndAfter({ atEnd: true, gap: 0, clientHeight: 0, userScrolled: false })).toBe(true);
+    expect(atEndAfter({ atEnd: false, gap: 0, clientHeight: 0, userScrolled: true })).toBe(false);
+  });
+  it("the user scrolling up leaves the end; back down returns to it", () => {
+    expect(atEndAfter({ atEnd: true, gap: 200, clientHeight: 300, userScrolled: true })).toBe(false);
+    expect(atEndAfter({ atEnd: false, gap: 2, clientHeight: 300, userScrolled: true })).toBe(true);
+  });
+  it("scrolled up stays scrolled up while the log changes", () => {
+    expect(atEndAfter({ atEnd: false, gap: 500, clientHeight: 300, userScrolled: false })).toBe(false);
   });
 });

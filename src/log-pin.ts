@@ -38,3 +38,20 @@ export function stillAtEnd(d: { gap: number; ownPin: boolean; userScrolled: bool
   if (d.gap < END_SLACK_PX) return true;
   return d.ownPin && !d.userScrolled;
 }
+
+/**
+ * Whether the log is at its end after a scroll event or a re-render. Only the
+ * user's own scrolling leaves the end: a layout change (history rendered while
+ * the box was hidden, a host showing it after mount, the log rebuilt, which
+ * clamps scrollTop to 0 for a moment) never does. A log that is not laid out
+ * (clientHeight 0) keeps what it had.
+ */
+export function atEndAfter(d: {
+  atEnd: boolean;
+  gap: number;
+  clientHeight: number;
+  userScrolled: boolean;
+}): boolean {
+  if (!d.clientHeight) return d.atEnd;
+  return stillAtEnd({ gap: d.gap, ownPin: d.atEnd && !d.userScrolled, userScrolled: d.userScrolled });
+}

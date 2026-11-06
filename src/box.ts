@@ -190,7 +190,7 @@ import {
   formatSize,
   isInlineImage,
 } from "./files.ts";
-import { repinEnd, stillAtEnd } from "./log-pin.ts";
+import { atEndAfter, repinEnd } from "./log-pin.ts";
 import { aecOn, applyAec } from "./aec.ts";
 import { DEBOUNCE_MS, afterChange, autoSend, enterSends, lineBreakSends, partialTail } from "./input.ts";
 import { TREE_STRINGS_EN, type TreeSource, type TreeStrings, watchTree } from "./tree.ts";
@@ -232,6 +232,9 @@ import { createSwipeHandoff, splitScroll, wheelPixels } from "./scroll-handoff.t
 import { type UiStrings, treeDefaults, uiStrings } from "./ui-strings.ts";
 import { RETIRED_SETTINGS, type SpeakMeta, pageHidden, silenceFor } from "./speak-rules.ts";
 import type { Assignee } from "./state-tree.ts";
+
+/** A scroll this soon after the user's wheel, touch, pointer or key is theirs. */
+const USER_SCROLL_MS = 1000;
 
 export {
   type AvatarSrc,
@@ -1872,6 +1875,9 @@ export class ChatBox extends Base {
     };
     column.addEventListener("wheel", userScroll, { passive: true });
     column.addEventListener("touchmove", userScroll, { passive: true });
+    // Dragging the scrollbar, or keys (PageUp, arrows, Home) on the focused log.
+    column.addEventListener("pointerdown", userScroll, { passive: true });
+    column.addEventListener("keydown", userScroll, { passive: true });
     column.addEventListener("transitionend", (e) => {
       if (e.target !== column) return;
       // Shrunk: land on the newest lines again, now that the height settled.
@@ -2893,7 +2899,9 @@ export class ChatBox extends Base {
     if (!c) return;
     c.classList.toggle("fade", c.scrollHeight > c.clientHeight + 1 || c.scrollTop > 0);
     const gap = c.scrollHeight - c.scrollTop - c.clientHeight;
-    this.atEnd = stillAtEnd({ gap, ownPin: this.ownPin && this.atEnd, userScrolled: false });
+    // Only the user's own scrolling leaves the end (src/log-pin.ts atEndAfter).
+    const userScrolled = Date.now() - this.userScrollAt < USER_SCROLL_MS;
+    this.atEnd = atEndAfter({ atEnd: this.atEnd, gap, clientHeight: c.clientHeight, userScrolled });
     if (gap < 4) this.ownPin = false;
   }
   /** The log or its lines changed size: a log at its end stays there (src/log-pin.ts). */
