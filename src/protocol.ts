@@ -5,8 +5,13 @@
 //
 // Wire (JSON text frames). An agent knocks on <hub>/control?scope=chat|eval
 // (&label=…, &for=<friend email>); a grant token resumes with x-liagent-token.
-//   page → hub        {type:"chat", id, text, to?, source?}   (to: a state-tree node path;
-//                                                     source "stt": from the mic, unchanged)
+//   page → hub        {type:"chat", id, text, to?, source?, context?, attachments?}
+//                                                    (to: a state-tree node path;
+//                                                     source "stt": from the mic, unchanged;
+//                                                     context: what the user attached with
+//                                                     the + menu, ChatContext, cleanContext;
+//                                                     attachments: files the host stored,
+//                                                     AttachmentRef[], cleanAttachments)
 //                     {type:"allow", pair, pages?: string[] | "all"} | {type:"deny"|"revoke", pair}
 //                     {type:"page", label}            (client-side navigation)
 //                     {type:"end-page", id}           (close one of the owner's pages)
@@ -118,6 +123,15 @@ export type ChatMessage = {
   quiet?: true;
   /** Set when the agent polished the line: when, by which agent, and how many times. */
   edited?: EditMark;
+  /** What the user attached to the line (the box's + menu): checked by cleanContext. */
+  context?: ChatContext;
+  /**
+   * Files sent with the line (pasted, dropped, or picked in the + menu) and
+   * stored by the host's `box.files` (src/files.ts): the host's id for each
+   * and what it is, never the bytes. The host says where to fetch one
+   * (`files.url(ref)`). Checked by cleanAttachments; owner lines only.
+   */
+  attachments?: AttachmentRef[];
 };
 
 /** Where an owner line came from: "stt" (the box's mic). Absent = typed. */
@@ -221,7 +235,15 @@ export type PageMessage =
   | { type: "page"; label: string }
   | { type: "end-page"; id: string }
   /** `source: "stt"`: sent from the box's mic, unchanged (absent = typed). */
-  | { type: "chat"; id: string; text: string; to?: string; source?: MessageSource }
+  | {
+      type: "chat";
+      id: string;
+      text: string;
+      to?: string;
+      source?: MessageSource;
+      context?: ChatContext;
+      attachments?: AttachmentRef[];
+    }
   | {
       type: "result";
       id: string;
@@ -356,6 +378,10 @@ export function parsePageMessage(raw: unknown): PageMessage | null {
     const out: PageMessage = { type: "chat", id, text };
     if (to && to !== ROOT_NODE) out.to = to;
     if (m.source === "stt") out.source = "stt";
+    const context = cleanContext(m.context);
+    if (context) out.context = context;
+    const attachments = cleanAttachments(m.attachments);
+    if (attachments) out.attachments = attachments;
     return out;
   }
   if (m.type === "result") {
@@ -485,7 +511,7 @@ export function compile(code: string): () => Promise<unknown> {
 
 // ── State-tree node paths ─────────────────────────────────────────────────
 // Messages are addressed to state-tree nodes; a node's assignee (agent or
-// human) receives them. The same rules as Lianki's debug chat.
+// human) receives them.
 
 /** Longest node path kept, in characters ("/words/prefetch"). */
 export const MAX_NODE_PATH = 80;
@@ -647,4 +673,162 @@ export function lineNode(m: {
     : `→ ${pathLabel(to)}`;
   const node = from || to;
   return { node, subtitle, border: `oklch(0.7 0.09 ${nodeHue(node)})` };
+}
+
+// ---- context: what the user attached to a line --------------------------------
+
+/** Most characters of an attached selection. */
+export const MAX_SELECTION = 2000;
+/** Most characters of the attached page's title. */
+export const MAX_CONTEXT_TITLE = 200;
+/** Most characters of its path (or host). */
+export const MAX_CONTEXT_PATH = 300;
+/** Most files attached to one line. */
+export const MAX_CONTEXT_FILES = 8;
+/** Most characters of a file's name, its URL and its media type. */
+export const MAX_FILE_NAME = 200;
+export const MAX_FILE_URL = 2048;
+export const MAX_FILE_TYPE = 100;
+
+/** A file the host uploaded for a line: where it is now, never its bytes. */
+export type ContextFile = {
+  name: string;
+  /** http(s) or a same-origin path ("/…"); nothing else survives cleanContext. */
+  url: string;
+  /** Its media type ("image/png"). */
+  type?: string;
+  /** In bytes. */
+  size?: number;
+};
+
+/**
+ * What goes with a line besides its text (the box's + menu): a selection
+ * from the page, where it was made, and files the host uploaded. Every part
+ * is optional, but an empty context is no context. Shown to the agent as
+ * data, never as instructions; shown in the box as text, never as HTML.
+ */
+export type ChatContext = {
+  selection?: string;
+  /** The page's path (no query, no fragment). */
+  path?: string;
+  title?: string;
+  /** The page's host, when the box runs on another site than its hub's. */
+  host?: string;
+  files?: ContextFile[];
+};
+
+const isFileUrl = (u: string) => /^https?:\/\/[^\s]+$/i.test(u) || /^\/(?!\/)[^\s]*$/.test(u);
+
+/**
+ * A ChatContext from the wire (or a host), or undefined: known keys only,
+ * each bounded; the path loses its query and fragment; a file without a
+ * name or with a URL that is not http(s) or a same-origin path is dropped.
+ * With neither a selection nor a file it is undefined.
+ */
+export function cleanContext(raw: unknown): ChatContext | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  const text = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
+  const selection = text(r.selection, MAX_SELECTION).trim();
+  const files: ContextFile[] = [];
+  if (Array.isArray(r.files))
+    for (const f of r.files) {
+      if (files.length >= MAX_CONTEXT_FILES) break;
+      if (!f || typeof f !== "object") continue;
+      const x = f as Record<string, unknown>;
+      const name = text(x.name, MAX_FILE_NAME).replace(/\s+/g, " ").trim();
+      const url = typeof x.url === "string" && x.url.length <= MAX_FILE_URL ? x.url.trim() : "";
+      if (!name || !url || !isFileUrl(url)) continue;
+      const file: ContextFile = { name, url };
+      const type = text(x.type, MAX_FILE_TYPE).trim();
+      if (type && /^[\w.+-]+\/[\w.+-]+$/.test(type)) file.type = type;
+      if (typeof x.size === "number" && Number.isFinite(x.size) && x.size >= 0)
+        file.size = Math.floor(x.size);
+      files.push(file);
+    }
+  if (!selection && !files.length) return undefined;
+  const out: ChatContext = {};
+  if (selection) out.selection = selection;
+  const path = text(r.path, MAX_CONTEXT_PATH).split(/[?#]/)[0]!.trim();
+  const title = text(r.title, MAX_CONTEXT_TITLE).replace(/\s+/g, " ").trim();
+  const host = text(r.host, MAX_CONTEXT_PATH).trim();
+  if (path) out.path = path;
+  if (title) out.title = title;
+  if (host && /^[\w.-]+(:\d+)?$/.test(host)) out.host = host;
+  if (files.length) out.files = files;
+  return out;
+}
+
+/**
+ * Two contexts as one: the newer selection (and its page) replaces the
+ * older, files add up (to MAX_CONTEXT_FILES, the same URL once).
+ */
+export function mergeContext(
+  a: ChatContext | null | undefined,
+  b: ChatContext | null | undefined,
+): ChatContext | undefined {
+  if (!a) return cleanContext(b);
+  if (!b) return cleanContext(a);
+  const sel = b.selection ? b : a;
+  const seen = new Set<string>();
+  const files = [...(a.files ?? []), ...(b.files ?? [])].filter((f) =>
+    seen.has(f.url) ? false : (seen.add(f.url), true),
+  );
+  return cleanContext({
+    selection: sel.selection,
+    path: sel.path ?? b.path ?? a.path,
+    title: sel.title ?? b.title ?? a.title,
+    host: sel.host ?? b.host ?? a.host,
+    files,
+  });
+}
+
+// ---- attachments: files the host stored for a line ----------------------------
+
+/** Most files sent with one line. */
+export const MAX_ATTACHMENTS = 10;
+/** Most characters of an attached file's name. */
+export const MAX_ATTACHMENT_NAME = 200;
+
+/**
+ * A file sent with a line (ChatMessage.attachments): the host's id for the
+ * stored upload, the file's name (for display only), its media type and its
+ * size in bytes. Where to fetch it is the host's business (ChatFiles.url).
+ */
+export type AttachmentRef = { id: string; name: string; type: string; size: number };
+
+/** Control and bidirectional-override characters: never in a shown file name. */
+// oxlint-disable-next-line no-control-regex
+const NAME_JUNK = /[\u0000-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+/** A file name for display: no control or bidi characters, no folders, bounded; "file" if empty. */
+export function cleanFileName(raw: unknown): string {
+  const s = typeof raw === "string" ? raw : "";
+  const base = s.replace(NAME_JUNK, "").split(/[\\/]/).at(-1)!.trim();
+  return base.slice(0, MAX_ATTACHMENT_NAME) || "file";
+}
+
+/**
+ * AttachmentRefs from the wire (or a host), or undefined: known keys only,
+ * each checked (an id of 1–64 of [A-Za-z0-9_-], a media type that looks like
+ * one, else application/octet-stream, a whole size ≥ 0, else 0); the same id
+ * once; at most MAX_ATTACHMENTS.
+ */
+export function cleanAttachments(raw: unknown): AttachmentRef[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: AttachmentRef[] = [];
+  for (const a of raw.slice(0, MAX_ATTACHMENTS)) {
+    if (!a || typeof a !== "object") continue;
+    const r = a as Record<string, unknown>;
+    if (typeof r.id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(r.id)) continue;
+    if (out.some((x) => x.id === r.id)) continue;
+    const type =
+      typeof r.type === "string" && /^[a-z0-9.+-]{1,40}\/[a-z0-9.+-]{1,60}$/.test(r.type)
+        ? r.type
+        : "application/octet-stream";
+    const size =
+      typeof r.size === "number" && Number.isSafeInteger(r.size) && r.size >= 0 ? r.size : 0;
+    out.push({ id: r.id, name: cleanFileName(r.name), type, size });
+  }
+  return out.length ? out : undefined;
 }

@@ -52,10 +52,29 @@
       </p>
     </main>
     <script type="module">
-      const { defineChatBox } = await import("./liagent.js");
+      const { defineChatBox, selectionAction, fileAction, mediaAction, memoryFiles } =
+        await import("./liagent.js");
       defineChatBox();
       const box = document.createElement("liagent-chat");
       document.body.append(box);
+      // Files: an in-memory host (nothing leaves the page). Paste, drop on the box, or + → File;
+      // the + menu's Files lists them. A real host uploads to its own store instead.
+      box.files = memoryFiles({
+        maxBytes: 20 * 1024 * 1024,
+        actions: (ref) => [
+          { id: "name", label: "Use name", run: () => box.setDraft(`About ${ref.name}: `) },
+        ],
+      });
+      const params = new URLSearchParams(location.search);
+      // The + menu: the page selection, and upload actions stored through box.files.
+      box.actions = [
+        selectionAction({ group: "Attach to message" }),
+        fileAction({ group: "Attach to message" }),
+        mediaAction({ group: "Attach to message" }),
+        { id: "hello", label: "Say hello", icon: "👋", onSelect: () => box.setDraft("hello") },
+      ];
+      if (params.get("mic")) box.micPlacement = params.get("mic");
+      if (params.get("tree")) box.treePlacement = params.get("tree");
       const now = Date.now();
       if (location.search.includes("hub")) {
         const { connectHub } = await import("./liagent.js");
@@ -86,7 +105,7 @@
         box.live = true;
         box.listeners = 1;
         let n = 0;
-        box.onSend = (text) => {
+        box.onSend = (text, _to, opts) => {
           if (!box.live) return false;
           const k = ++n;
           box.push({
@@ -95,6 +114,8 @@
             label: "",
             text,
             at: Date.now(),
+            ...(opts?.context ? { context: opts.context } : {}),
+            ...(opts?.attachments ? { attachments: opts.attachments } : {}),
           });
           box.busy = true;
           setTimeout(() => {

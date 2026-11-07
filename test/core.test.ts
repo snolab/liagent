@@ -239,6 +239,23 @@ describe("createChat sending", () => {
     expect(chat.getState().messages.map((m) => m.id)).toEqual(["id1"]);
   });
 
+  it("a retried line keeps what was attached to it", () => {
+    const f = fakeTransport();
+    const chat = createChat({ transport: f.t, newId: () => "id1" });
+    chat.start();
+    const attachments = [{ id: "f1", name: "a.png", type: "image/png", size: 3 }];
+    chat.send("see", { context: { path: "/words" }, attachments });
+    chat.receive({ type: "rate-limited", id: "id1", retryIn: 1000 });
+    expect(chat.retry("id1")).toBe(true);
+    expect(f.sent[1]).toEqual({
+      type: "chat",
+      id: "id1",
+      text: "see",
+      context: { path: "/words" },
+      attachments,
+    });
+  });
+
   it("a rate-limited or dropped line fails, and retry sends it again with its id", () => {
     const f = fakeTransport();
     let n = 0;
