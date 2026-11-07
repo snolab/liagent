@@ -39,8 +39,10 @@ export {
   type OutboxEntry,
   type Transport,
   type TransportSink,
+  connectVoice,
   createChat,
 } from "./core.ts";
+export { bindDraft, createDraft, type Draft, type DraftState } from "./draft.ts";
 export * from "./protocol.ts";
 export { DEBOUNCE_MS } from "./input.ts";
 export { type Silence, type SpeakMeta, isQuiet, silenceFor } from "./speak-rules.ts";

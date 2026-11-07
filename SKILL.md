@@ -473,6 +473,13 @@ Framework notes (details and a runnable page for each in docs/embed.md):
 Mount it only where it is wanted (for example the site owner's pages, or a
 debug mode), and keep `evalCode` off unless step 3 enables eval.
 
+**Your own UI (headless).** If the project wants a chat UI in its own
+style instead of the box, build it on `liagent/core` (`createChat`,
+`hubTransport`, `createDraft`) or `liagent/react` (`useHubChat`,
+`useChatState`, `useDraft`); see docs/headless.md. Keep the rules: render
+message text as text only, call `allow()` only from the user's tap, and
+show a pairing's label and code.
+
 **Voice input (optional).** Put `<liagent-mic slot="mic" stt-url="/api/stt">`
 inside the box (`defineMic()` from `liagent/mic`). The user then dictates,
 and each spoken sentence is sent as a chat line. liagent has no STT backend,

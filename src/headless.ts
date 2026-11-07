@@ -12,6 +12,7 @@
 export * from "./core.ts";
 export { IDLE_MS, type HubOptions, hubTransport } from "./client.ts";
 export { pageHint, when } from "./format.ts";
+export { type Draft, type DraftOptions, type DraftState, bindDraft, createDraft } from "./draft.ts";
 export {
   type AvatarSrc,
   type LineAvatar,

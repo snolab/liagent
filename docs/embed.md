@@ -14,6 +14,9 @@ position, so it fits any page and any framework. This guide covers:
 8. [Voice input](#8-voice-input): `<liagent-mic>`, your STT endpoint, Silero VAD
 9. [Hands-free voice](#9-hands-free-voice): replies read aloud, barge-in, your TTS endpoint
 
+To build your own chat UI instead of using this box, see
+[headless.md](headless.md) (`liagent/core`, `liagent/react`).
+
 ## 1. Loading it
 
 The module defines nothing until you call `defineChatBox()`, and it is safe
