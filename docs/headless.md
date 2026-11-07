@@ -93,6 +93,7 @@ The display helpers the box uses are exported too:
 
 ```ts
 chat.send(text, { to: "/words" }); // false: not sent, so keep the draft
+chat.send(text, { context, attachments }); // what the user attached, and file refs (never bytes)
 chat.retry(id);
 chat.dismiss(id); // a failed outbox line
 chat.allow(pair, { pages: "all" }); // only from the user's tap (see 9)

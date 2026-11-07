@@ -33,6 +33,8 @@
 import {
   BUSY_AFTER_REPLY_MS,
   BUSY_MS,
+  type AttachmentRef,
+  type ChatContext,
   type ChatMessage,
   type EditedEvent,
   type HubState,
@@ -60,6 +62,8 @@ export type OutboxEntry = Readonly<{
   text: string;
   to?: string;
   source?: MessageSource;
+  context?: ChatContext;
+  attachments?: readonly AttachmentRef[];
   at: number;
   status: "sending" | "failed";
 }>;
@@ -166,7 +170,15 @@ export type Chat = {
   on<K extends keyof ChatEvents>(event: K, fn: ChatEvents[K]): () => void;
 
   /** Send a line (to a state-tree node, or the main thread). False: not sent; keep the draft. */
-  send(text: string, opts?: { to?: string; source?: MessageSource }): boolean;
+  send(
+    text: string,
+    opts?: {
+      to?: string;
+      source?: MessageSource;
+      context?: ChatContext;
+      attachments?: readonly AttachmentRef[];
+    },
+  ): boolean;
   /** Send a failed outbox line again. */
   retry(id: string): boolean;
   /** Drop an outbox line. */
@@ -398,6 +410,8 @@ export function createChat(opts: ChatOptions = {}): Chat {
       text: e.text,
       ...(e.to ? { to: e.to } : {}),
       ...(e.source ? { source: e.source } : {}),
+      ...(e.context ? { context: e.context } : {}),
+      ...(e.attachments?.length ? { attachments: e.attachments } : {}),
     });
 
   const sink: TransportSink = {
@@ -444,6 +458,8 @@ export function createChat(opts: ChatOptions = {}): Chat {
         text: t,
         ...(o.to ? { to: o.to } : {}),
         ...(o.source ? { source: o.source } : {}),
+        ...(o.context ? { context: o.context } : {}),
+        ...(o.attachments?.length ? { attachments: o.attachments } : {}),
       };
       if (!sendLine(e)) return false;
       setOutbox((x) => [...x, { ...e, at: now(), status: "sending" }]);

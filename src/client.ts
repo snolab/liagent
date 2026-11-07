@@ -243,7 +243,8 @@ export function hubTransport(opts: HubOptions): Transport {
 export function connectHub(box: ChatBox, opts: HubOptions): HubConnection {
   const chat = createChat({ transport: hubTransport(opts) });
   box.chat = chat;
-  box.onSend = (text, to, o) => chat.send(text, { to, source: o?.source });
+  box.onSend = (text, to, o) =>
+    chat.send(text, { to, source: o?.source, context: o?.context, attachments: o?.attachments });
   box.onAnswer = (type, p, answer) =>
     void (type === "deny" ? chat.deny(p.pair) : chat.allow(p.pair, answer));
   box.onEnd = (p) => void chat.end(p.pair);

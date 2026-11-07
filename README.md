@@ -45,7 +45,7 @@ box.push(message); // live: an agent's reply is read aloud
 const hub = connectHub(box, { url: "wss://example.com/api/chat" });
 ```
 
-The box is one glass bar, `[mark | tree | input … | mic]`: the mark minimizes
+The box is one glass bar, `[mark | tree | + | input … | mic]`: the mark minimizes
 it (tap), opens its menu (double tap) and moves it (drag); the tree button shows
 the state tree (`treeSource`) and drags sideways through its levels. Minimized,
 new lines float over the bar and the tree's frontier (✓ done, ▶ in progress,
@@ -55,22 +55,91 @@ rest of the gesture on to the log.
 
 Properties: `messages`, `live`, `listeners`, `sessions`, `pending`, `evalRan`,
 `busy`, `guest`, `notice`, `warning`, `defaultOpen`, `placeholder`,
-`treeSource`, `strings`, `voice`, `voicePrefer`, `micActive`, and the avatars: `agentAvatar`
+`treeSource`, `strings`, `voice`, `voicePrefer`, `micActive`, `actions`,
+`micPlacement`, `treePlacement`, `attached`, and the avatars: `agentAvatar`
 (set it to your app's logo), `userAvatar`, `userName`, `userId`.
-Callbacks: `onSend(text, to?, { source? }) → boolean`, `onAnswer(type, pair, scope?)`, `onEnd(pair)`,
+Callbacks: `onSend(text, to?, { source?, context? }) → boolean`, `onAnswer(type, pair, scope?)`, `onEnd(pair)`,
 `avatarFor(message)` (a per-sender avatar).
 Voice input plugs in as a child with `slot="mic"` (it lands at the bar's right
 end) and drives `draft`, `setDraft(text, { source: "stt" })`, `setPartial(text)`,
 `submit()` and `micActive`; see [docs/embed.md](docs/embed.md#voice-input-and-output).
 Attributes: `storage-key` (localStorage prefix, default `liagent`), `collapsed`,
-`placeholder`, `agent-avatar`, `user-avatar`, `user-name`, `mic-active`. Theme: `--liagent-bg`
+`placeholder`, `agent-avatar`, `user-avatar`, `user-name`, `mic-active`,
+`mic-placement`, `tree-placement`. Theme: `--liagent-bg`
 (set it to your page colour), `--liagent-fg`, `--liagent-agent`, `--liagent-z`,
-`--liagent-width`, `--liagent-avatar`.
+`--liagent-width`, `--liagent-avatar`, `--liagent-control`, `--liagent-bar-border`,
+`--liagent-bar-pad`, `--liagent-menu-bg`, `--liagent-accent`.
 
 [docs/embed.md](docs/embed.md) shows how to embed it: plain HTML, your own
 transport, React, Vue, Svelte, Angular, Solid and Preact (each with a runnable
 page under `examples/`), and a full reference. See the header of `src/box.ts` for the behaviour, and `src/input.ts` for when
 a draft is sent.
+
+## The + menu and the bar's buttons
+
+The bar is slot-based: `[mark | leading … | tree | + | input … | trailing … | mic]`.
+Your app registers its own actions; each one goes in the **+ menu** (the
+default), or on the bar as a **leading** or **trailing** button, by its
+`place`. Moving a feature from the bar into the menu is a one-word change.
+
+```js
+const { selectionAction, fileAction, mediaAction } = await import("liagent/box");
+
+box.actions = [
+  // Built in, optional: the page's last selection outside the box (never from
+  // password, one-time-code or card fields, or [data-sensitive]; 2000 chars
+  // at most; forgotten after 30 min, a tap elsewhere, or a send).
+  selectionAction({ group: "Attach" }),
+  // Files and media: YOUR upload; liagent only carries the result.
+  fileAction({ group: "Attach", upload: (file) => myUpload(file) }), // → { url, name, type?, size? }
+  mediaAction({ group: "Attach", upload: (file) => myUpload(file) }),
+  // Your own: do something…
+  {
+    id: "new-note",
+    label: "New note",
+    icon: "📝",
+    group: "Create",
+    onSelect: () => openNoteEditor(),
+  },
+  // …or attach something to the line being typed.
+  {
+    id: "page",
+    label: "Attach this page",
+    attach: () => ({ selection: document.title, path: location.pathname }),
+  },
+  // A bar button instead of a menu row: same shape, `place` says where.
+  { id: "help", label: "Help", icon: "?", place: "trailing", onSelect: () => openHelp() },
+];
+box.treePlacement = "menu"; // the tree button as a + menu row: "leading" | "menu" | "hidden"
+box.micPlacement = "inside"; // the mic: "trailing" | "leading" | "inside" | "hidden"
+```
+
+An action is plain data: `id`, `label`, `icon` (a glyph or an SVG node,
+never HTML), `place`, `group`, `hint()`, `enabled()`, `subscribe(changed)`
+(re-render when they change), `onSelect(host)` and/or `attach(host)`, and
+`sent()` (the line it attached to went out). What is attached shows as a
+chip over the input (× drops it) and goes out with the next line as its
+`context`: `{ selection?, path?, title?, host?, files? }`, cleaned on the
+hub (`cleanContext`: known keys, each bounded; file URLs http(s) or
+same-origin only) and shown to the agent as data. The + menu's buttons keep
+the input's focus, so a phone's keyboard stays up. Theme it with
+`--liagent-menu-bg` and `--liagent-accent`. See
+[docs/embed.md](docs/embed.md#the--menu).
+
+**Files.** Set `box.files` to your own upload handler and the box takes
+pasted, dropped and picked files (`fileAction()` / `mediaAction()` with no
+`upload` of their own): chips with progress and ×, then refs on the line as
+`attachments` (`{id, name, type, size}`, never bytes). Optional `list`,
+`remove` and `actions` add a Files list to the + menu. liagent has no
+storage of its own; `memoryFiles()` is an in-memory host for demos and
+tests. See [docs/embed.md](docs/embed.md#files-paste-drop-pick-and-the-file-list).
+
+**Geometry:** the bar's corner radius is derived, never set:
+`border + padding + control / 2` (`--liagent-bar-border`,
+`--liagent-bar-pad`, `--liagent-control`). The mic is a circle one control
+wide, so at any size it stays concentric with the corner it sits in. The
+mic's look: `--liagent-mic-fg`, `--liagent-mic-bg`, `--liagent-mic-icon`,
+`--liagent-mic-rec`, `--liagent-mic-talk`.
 
 ## Headless: your own UI
 
@@ -138,7 +207,12 @@ the language (else it comes from the reply's script), and `prefer` lists
 voice names to try first (exact, then substring), with the automatic pick
 as the fallback. The choice is made again when the browser's voice list
 changes. With the mic on, the browser's echo canceller and
-a text-level echo guard keep the agent from hearing itself. See
+a text-level echo guard keep the agent from hearing itself. Echo
+cancellation is a per-device switch (`applyAec(on)`, also in the box's menu
+when a mic is in it): off means no processing at all, and capture is held
+while the agent speaks and while the page plays its own sounds (wrap them in
+`pageAudio().start()`, and call the function it returns when they end). A
+change reopens an open mic at once. See
 [docs/embed.md](docs/embed.md#9-hands-free-voice).
 
 Not every line should be spoken. `liagent say --quiet` lines are shown but

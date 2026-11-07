@@ -187,8 +187,11 @@ describe("connectHub", () => {
     ws.open();
     expect(box.onSend!("hi", "/words")).toBe(true);
     expect(ws.sent[0]).toMatchObject({ type: "chat", text: "hi", to: "/words" });
+    const attachments = [{ id: "f1", name: "a.png", type: "image/png", size: 3 }];
+    box.onSend!("see", undefined, { context: { path: "/words" }, attachments });
+    expect(ws.sent[1]).toMatchObject({ context: { path: "/words" }, attachments });
     box.onEnd!({ pair: "p", code: "c", label: "", at: 0 });
-    expect(ws.sent[1]).toEqual({ type: "revoke", pair: "p" });
+    expect(ws.sent[2]).toEqual({ type: "revoke", pair: "p" });
     hub.close();
     expect(hub.chat.getState().status).toBe("closed");
   });
