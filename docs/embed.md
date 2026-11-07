@@ -353,7 +353,7 @@ effect.
 | `treeSource`    | `TreeSource`                                      | The state tree: a URL serving its markdown, a function returning markdown or nodes, or a feed `{ subscribe(onUpdate) }`. The tree button shows it; minimized, its frontier sits under the floating lines. Loaded when set and each time the tree opens. |
 | `treeRepo`      | `string`                                          | `owner/repo` that a bare `#123` in the tree links to.                                                                                                                                                                                                   |
 | `treeStrings`   | `Partial<TreeStrings>`                            | The tree's strings (English; Chinese on a `zh` page).                                                                                                                                                                                                   |
-| `strings`       | `Partial<UiStrings>`                              | The box's own strings (English; Chinese on a `zh` page, under yours).                                                                                                                                                                                   |
+| `strings`       | `Partial<UiStrings>`                              | The box's own strings, all of its text: status, requests, menu, hints (`UI_EN` lists the keys; English, Chinese on a `zh` page, under yours).                                                                                                           |
 | `micActive`     | `boolean`                                         | A mic is on: treated as focus (the log opens, the box is opaque), and the debounce never sends by itself. Attribute: `mic-active`.                                                                                                                      |
 | `voice`         | `ChatVoice`                                       | `{ speak(text, id?), stop(why?) }`: reads replies aloud instead of `speechSynthesis`. See [Voice input and output](#voice-input-and-output).                                                                                                            |
 | `actions`       | `ChatAction[]`                                    | The + menu's items and the bar's own buttons, each placed by `place` (`"menu"`, `"leading"`, `"trailing"`). See [The + menu](#the--menu).                                                                                                               |
@@ -446,21 +446,21 @@ name from a visually hidden span instead.
 
 **Theming** (CSS custom properties on the element):
 
-| Variable               | Default                                           | Used for                                                                       |
-| ---------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `--liagent-bg`         | `Canvas`                                          | The halo behind the text, and the glass bar (55%). Set it to your page colour. |
-| `--liagent-fg`         | `CanvasText`                                      | Text                                                                           |
-| `--liagent-agent`      | `oklch(0.55 0.14 150)`                            | The spinner                                                                    |
-| `--liagent-avatar`     | `18px`                                            | Avatar size                                                                    |
-| `--liagent-z`          | `40`                                              | z-index                                                                        |
-| `--liagent-width`      | `min(20rem, 100vw - 1rem)`                        | Box width                                                                      |
-| `--liagent-log-max` | `4.4rem` | The log's height at rest (and the minimized tree's). Set it to fill your host: px or vh (a % has nothing to resolve against) |
-| `--liagent-log-max-wide` | `30vh` | The log's height while typing, with a mic on, or with the tree open |
-| `--liagent-control`    | `2.125rem`                                        | One line of the bar: the input's and the buttons' height, the mic's size       |
-| `--liagent-bar-border` | `1px`                                             | The bar's border                                                               |
-| `--liagent-bar-pad`    | `2px` (minimized: `--liagent-bar-pad-min`, `1px`) | The bar's padding                                                              |
-| `--liagent-menu-bg`    | 92% of `--liagent-bg`                             | The + menu's fill                                                              |
-| `--liagent-accent`     | `oklch(0.55 0.12 250)`                            | The + menu's badges, the quote line                                            |
+| Variable                 | Default                                           | Used for                                                                                                                     |
+| ------------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `--liagent-bg`           | `Canvas`                                          | The halo behind the text, and the glass bar (55%). Set it to your page colour.                                               |
+| `--liagent-fg`           | `CanvasText`                                      | Text                                                                                                                         |
+| `--liagent-agent`        | `oklch(0.55 0.14 150)`                            | The spinner                                                                                                                  |
+| `--liagent-avatar`       | `18px`                                            | Avatar size                                                                                                                  |
+| `--liagent-z`            | `40`                                              | z-index                                                                                                                      |
+| `--liagent-width`        | `min(20rem, 100vw - 1rem)`                        | Box width                                                                                                                    |
+| `--liagent-log-max`      | `4.4rem`                                          | The log's height at rest (and the minimized tree's). Set it to fill your host: px or vh (a % has nothing to resolve against) |
+| `--liagent-log-max-wide` | `30vh`                                            | The log's height while typing, with a mic on, or with the tree open                                                          |
+| `--liagent-control`      | `2.125rem`                                        | One line of the bar: the input's and the buttons' height, the mic's size                                                     |
+| `--liagent-bar-border`   | `1px`                                             | The bar's border                                                                                                             |
+| `--liagent-bar-pad`      | `2px` (minimized: `--liagent-bar-pad-min`, `1px`) | The bar's padding                                                                                                            |
+| `--liagent-menu-bg`      | 92% of `--liagent-bg`                             | The + menu's fill                                                                                                            |
+| `--liagent-accent`       | `oklch(0.55 0.12 250)`                            | The + menu's badges, the quote line                                                                                          |
 
 The bar's corner radius is not a variable: it is
 `--liagent-bar-border + --liagent-bar-pad + --liagent-control / 2`, so a

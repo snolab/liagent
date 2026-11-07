@@ -58,6 +58,118 @@ export type UiStrings = {
   /** Echo cancellation in the menu, when a mic is in the box. */
   echoOn: string;
   echoOff: string;
+  /** The empty log's hint ({s}: seconds). */
+  hintType: string;
+  /** The input's placeholder while the mark is held. */
+  dragHint: string;
+  /** Placeholder when a node is aimed at. */
+  messageNode: string;
+  /** Placeholder. */
+  messageAgent: string;
+  /** Placeholder with no agent listening. */
+  agentOfflineWaits: string;
+  /** Accessible name of the pairing requests. */
+  asksLabel: string;
+  /** Accessible name of the @/ node list. */
+  nodesLabel: string;
+  /** The × on the aimed node. */
+  toMainThread: string;
+  /** Status. */
+  statusUnavailable: string;
+  /** Status. */
+  statusNotConnected: string;
+  /** Status. */
+  statusReconnecting: string;
+  /** Status ({n}: agents). */
+  statusListening: string;
+  /** Status. */
+  statusAgentOffline: string;
+  /** The spinner's label. */
+  agentWorking: string;
+  /** A code request's pages, when the host grants all. */
+  askWhereAll: string;
+  /** A code request's pages. */
+  askWhereChosen: string;
+  /** What a friend's preview asks. */
+  askFriend: string;
+  /** What an eval request asks. */
+  askEval: string;
+  /** What a chat request asks. */
+  askChat: string;
+  /** What an older agent asks. */
+  askOld: string;
+  /** A request's full sentence (tooltip, label). */
+  askSentence: string;
+  /** Request tag. */
+  tagCode1h: string;
+  /** Request tag. */
+  tagCode8h: string;
+  /** Request tag. */
+  tagChat30d: string;
+  /** Button. */
+  allow: string;
+  /** Allow's tooltip (all-pages). */
+  allowAllTitle: string;
+  /** Allow's tooltip. */
+  allowTickedTitle: string;
+  /** An older agent's code button. */
+  allow8h: string;
+  /** Its tooltip (all-pages). */
+  allow8hAllTitle: string;
+  /** Its tooltip. */
+  allow8hTitle: string;
+  /** An older agent's chat button. */
+  chatOnly: string;
+  /** Its tooltip. */
+  chatOnlyTitle: string;
+  /** The ✕'s label. */
+  deny: string;
+  /** Page tick. */
+  pagesAllLater: string;
+  /** After this page's name. */
+  thisPage: string;
+  /** Screen-reader prefix of your line. */
+  you: string;
+  /** Screen-reader prefix of an agent line with no label. */
+  agentName: string;
+  /** The speed group's label. */
+  speedLabel: string;
+  /** Its visible label. */
+  speed: string;
+  /** Menu. */
+  readAloudMic: string;
+  /** Menu. */
+  readAloud: string;
+  /** Menu. */
+  silent: string;
+  /** Menu. */
+  minimize: string;
+  /** Menu. */
+  restore: string;
+  /** The mark's label. */
+  minimizeChat: string;
+  /** The mark's label. */
+  restoreChat: string;
+  /** The mark's label with unread lines. */
+  restoreChatNew: string;
+  /** A session's kind. */
+  sessChat: string;
+  /** A session's kind. */
+  sessPreview: string;
+  /** A session's kind. */
+  sessEval: string;
+  /** A session's pages. */
+  allPages: string;
+  /** A session's pages. */
+  pagesOne: string;
+  /** A session's pages. */
+  pagesN: string;
+  /** Ends a session or a page. */
+  end: string;
+  /** Menu heading. */
+  openPages: string;
+  /** Second tap on this page's End. */
+  endThisPage: string;
 };
 
 export const UI_EN: UiStrings = {
@@ -91,6 +203,62 @@ export const UI_EN: UiStrings = {
   filesClose: "Close the files",
   echoOn: "Echo cancellation on",
   echoOff: "Echo cancellation off",
+  hintType: "Type here; it is sent {s} s after you stop.",
+  dragHint: "drag: move · tap: minimize · double-tap: menu",
+  messageNode: "Message {node}…",
+  messageAgent: "Message the agent…",
+  agentOfflineWaits: "Agent offline — your message waits for it…",
+  asksLabel: "Agent connections",
+  nodesLabel: "Nodes to address",
+  toMainThread: "Send to the main thread instead",
+  statusUnavailable: "chat unavailable",
+  statusNotConnected: "not connected — your draft is kept",
+  statusReconnecting: "reconnecting…",
+  statusListening: "agent listening ({n})",
+  statusAgentOffline: "agent offline · messages wait until it is back",
+  agentWorking: "the agent is working",
+  askWhereAll: "on all your pages, including pages opened later,",
+  askWhereChosen: "on the chosen pages",
+  askFriend: "to run code {where} for 1 hour",
+  askEval: "to run code {where} and chat, for 8 hours",
+  askChat: "to chat with you, for 30 days",
+  askOld: "to run code on your pages, or to chat",
+  askSentence: "{label} asks {what}. Allow only if the agent shows the same code: {code}.",
+  tagCode1h: "code · 1h",
+  tagCode8h: "code · 8h",
+  tagChat30d: "chat · 30d",
+  allow: "Allow",
+  allowAllTitle: "Allow on all your pages, including pages opened later",
+  allowTickedTitle: "Allow on the ticked pages",
+  allow8h: "8h",
+  allow8hAllTitle: "Allow code on all your pages and chat, for 8 hours",
+  allow8hTitle: "Allow code and chat for 8 hours",
+  chatOnly: "chat",
+  chatOnlyTitle: "Chat only, for 30 days",
+  deny: "Deny",
+  pagesAllLater: "all pages, and pages opened later",
+  thisPage: " (this page)",
+  you: "you",
+  agentName: "agent",
+  speedLabel: "Reading speed",
+  speed: "Speed",
+  readAloudMic: "Replies read aloud (mic on)",
+  readAloud: "Replies read aloud",
+  silent: "Replies silent",
+  minimize: "–  Minimize",
+  restore: "+  Restore",
+  minimizeChat: "Minimize chat",
+  restoreChat: "Restore chat",
+  restoreChatNew: "Restore chat, {n} new",
+  sessChat: "chat",
+  sessPreview: "preview",
+  sessEval: "eval",
+  allPages: "all pages",
+  pagesOne: "1 page",
+  pagesN: "{n} pages",
+  end: "End",
+  openPages: "Your open pages",
+  endThisPage: "End this page?",
 };
 
 export const UI_ZH: UiStrings = {
@@ -124,6 +292,62 @@ export const UI_ZH: UiStrings = {
   filesClose: "关闭文件列表",
   echoOn: "回声消除：开",
   echoOff: "回声消除：关",
+  hintType: "在这里输入，停止输入 {s} 秒后自动发送。",
+  dragHint: "拖动：移动 · 轻点：最小化 · 双击：菜单",
+  messageNode: "发给 {node}…",
+  messageAgent: "给 agent 发消息…",
+  agentOfflineWaits: "agent 离线，消息会等它回来…",
+  asksLabel: "agent 连接",
+  nodesLabel: "可发送的节点",
+  toMainThread: "改发到主线程",
+  statusUnavailable: "聊天不可用",
+  statusNotConnected: "未连接，草稿已保留",
+  statusReconnecting: "重新连接中…",
+  statusListening: "agent 在听（{n}）",
+  statusAgentOffline: "agent 离线 · 消息会等它回来",
+  agentWorking: "agent 正在工作",
+  askWhereAll: "在你所有页面（包括之后打开的）上",
+  askWhereChosen: "在选中的页面上",
+  askFriend: "{where}运行代码，1 小时",
+  askEval: "{where}运行代码并聊天，8 小时",
+  askChat: "和你聊天，30 天",
+  askOld: "在你的页面上运行代码，或聊天",
+  askSentence: "{label} 请求{what}。只有 agent 显示同样的代码 {code} 时才允许。",
+  tagCode1h: "代码 · 1 小时",
+  tagCode8h: "代码 · 8 小时",
+  tagChat30d: "聊天 · 30 天",
+  allow: "允许",
+  allowAllTitle: "在你所有页面上允许（包括之后打开的）",
+  allowTickedTitle: "在勾选的页面上允许",
+  allow8h: "8 小时",
+  allow8hAllTitle: "在你所有页面上允许代码和聊天，8 小时",
+  allow8hTitle: "允许代码和聊天，8 小时",
+  chatOnly: "聊天",
+  chatOnlyTitle: "只聊天，30 天",
+  deny: "拒绝",
+  pagesAllLater: "所有页面，以及之后打开的页面",
+  thisPage: "（本页）",
+  you: "你",
+  agentName: "agent",
+  speedLabel: "朗读速度",
+  speed: "语速",
+  readAloudMic: "朗读回复（麦克风开着）",
+  readAloud: "朗读回复",
+  silent: "不朗读回复",
+  minimize: "–  最小化",
+  restore: "+  还原",
+  minimizeChat: "最小化聊天",
+  restoreChat: "还原聊天",
+  restoreChatNew: "还原聊天，{n} 条新消息",
+  sessChat: "聊天",
+  sessPreview: "预览",
+  sessEval: "eval",
+  allPages: "所有页面",
+  pagesOne: "1 个页面",
+  pagesN: "{n} 个页面",
+  end: "结束",
+  openPages: "你打开的页面",
+  endThisPage: "结束本页？",
 };
 
 /** The tree's strings in Chinese (tree.ts TreeStrings). */
