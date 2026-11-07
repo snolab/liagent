@@ -446,19 +446,19 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 }
 /* The one scroller: the tree (when open) on top, the log below. Compact at rest. */
 .column {
-  max-height: 4.4rem; min-height: 3rem; overflow-y: auto; padding: 6px 8px;
+  max-height: var(--liagent-log-max, 4.4rem); min-height: 3rem; overflow-y: auto; padding: 6px 8px;
   scrollbar-width: none; transition: max-height .15s ease-out;
 }
 .column::-webkit-scrollbar { display: none; }
-.column.wide { max-height: 30vh; }
+.column.wide { max-height: var(--liagent-log-max-wide, 30vh); }
 .column.fade { -webkit-mask-image: linear-gradient(to bottom, transparent, black .9rem); mask-image: linear-gradient(to bottom, transparent, black .9rem); }
 .column.wide.fade { -webkit-mask-image: linear-gradient(to bottom, transparent, black 2.5rem); mask-image: linear-gradient(to bottom, transparent, black 2.5rem); }
 .treepanel { pointer-events: none; display: flex; flex-direction: row-reverse; align-items: flex-start; min-width: 0; max-width: 100%; padding-bottom: 4px; animation: appear .18s ease-out; }
 @keyframes appear { from { opacity: 0; } }
 .treepanel .tbody { flex: 1; min-width: 0; }
 .treepanel .x { pointer-events: auto; flex: none; position: relative; padding: 0 6px; font-size: 10px; color: var(--muted); }
-.ftree .tbody { max-height: 4.4rem; overflow-y: auto; scrollbar-width: none; }
-.ftree .tbody.wide { max-height: 30vh; }
+.ftree .tbody { max-height: var(--liagent-log-max, 4.4rem); overflow-y: auto; scrollbar-width: none; }
+.ftree .tbody.wide { max-height: var(--liagent-log-max-wide, 30vh); }
 .ftree .tbody.fade { -webkit-mask-image: linear-gradient(to bottom, transparent, black .9rem); mask-image: linear-gradient(to bottom, transparent, black .9rem); }
 .blink { animation: blink 1.6s ease-in-out infinite; }
 @keyframes blink { 50% { opacity: .35; } }

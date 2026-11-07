@@ -454,6 +454,8 @@ name from a visually hidden span instead.
 | `--liagent-avatar`     | `18px`                                            | Avatar size                                                                    |
 | `--liagent-z`          | `40`                                              | z-index                                                                        |
 | `--liagent-width`      | `min(20rem, 100vw - 1rem)`                        | Box width                                                                      |
+| `--liagent-log-max` | `4.4rem` | The log's height at rest (and the minimized tree's). Set it to fill your host: px or vh (a % has nothing to resolve against) |
+| `--liagent-log-max-wide` | `30vh` | The log's height while typing, with a mic on, or with the tree open |
 | `--liagent-control`    | `2.125rem`                                        | One line of the bar: the input's and the buttons' height, the mic's size       |
 | `--liagent-bar-border` | `1px`                                             | The bar's border                                                               |
 | `--liagent-bar-pad`    | `2px` (minimized: `--liagent-bar-pad-min`, `1px`) | The bar's padding                                                              |
