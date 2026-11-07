@@ -797,7 +797,7 @@ type FloatLife = ReturnType<typeof createFloatLife>;
 /** The chat box element. Plain properties in, callbacks out; see the file header. */
 export class ChatBox extends Base {
   static get observedAttributes() {
-    return ["mic-active", "hold", "mic-placement", "tree-placement", "all-pages"];
+    return ["mic-active", "hold", "mic-placement", "tree-placement", "all-pages", "no-echo-toggle"];
   }
   /**
    * Called with each draft that goes out, and the state-tree node it is
@@ -1281,6 +1281,18 @@ export class ChatBox extends Base {
    * "all"): the request says so, Allow sends pages "all", and no page ticks
    * are shown. Attribute: all-pages.
    */
+  /**
+   * Show the menu's echo-cancellation row when a mic is in the box. Default
+   * true; false (attribute no-echo-toggle) hides it, for a host that decides
+   * the mic's processing itself.
+   */
+  get echoToggle() {
+    return !this.hasAttribute("no-echo-toggle");
+  }
+  set echoToggle(v: boolean) {
+    if (typeof this.toggleAttribute === "function") this.toggleAttribute("no-echo-toggle", !v);
+    this.renderMenu();
+  }
   get allPages() {
     return this._allPages;
   }
@@ -1292,6 +1304,7 @@ export class ChatBox extends Base {
     if (name === "mic-active") this.applyMic(this.hasAttribute("mic-active"));
     else if (name === "hold") this.applyHold(this.hasAttribute("hold"));
     else if (name === "all-pages") this.applyAllPages(this.hasAttribute("all-pages"));
+    else if (name === "no-echo-toggle") this.renderMenu();
     else this.renderActions();
   }
   private applyAllPages(v: boolean) {
@@ -3491,7 +3504,8 @@ export class ChatBox extends Base {
     }
     menu.append(status, speak, rate);
     // Echo cancellation (src/aec.ts), when a mic is in the box: a tap reopens an open mic.
-    if ((this.els.micslot as HTMLSlotElement).assignedElements?.().length) {
+    // The host can hide it (no-echo-toggle / echoToggle = false): its own mic settings rule.
+    if (this.echoToggle && (this.els.micslot as HTMLSlotElement).assignedElements?.().length) {
       const aec = document.createElement("button");
       aec.type = "button";
       aec.setAttribute("role", "menuitemcheckbox");

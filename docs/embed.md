@@ -428,6 +428,8 @@ name from a visually hidden span instead.
   (read once, when attached).
 - `mic-active`: the same as `micActive` (watched).
 - `mic-placement`, `tree-placement`: the same as the properties (watched).
+- `no-echo-toggle` (property `echoToggle = false`, watched): hides the menu's
+  echo-cancellation row, for a host that decides the mic's processing itself.
 - `keep-scroll`: the box keeps where the log is scrolled (under its
   `storage-key`, in localStorage) and goes back there after a reload, or to
   the newest line if that line is gone. Without it, the log opens at its
@@ -953,6 +955,7 @@ are exported for that.
 | `.box`                           | The `DictationTarget` (default: the closest `<liagent-chat>`).                                |
 | `.voice`                         | A `MicVoiceLink`: a voice output that reads replies hands-free (ducking, barge-in, the echo). |
 | `.strings`                       | The labels and error notes (`MIC_STRINGS_EN` lists them), e.g. translated.                    |
+| `.strings.rec`                   | Optional: a visible label under the icon while capturing (e.g. `"録音"`). Default none: the ring only. |
 | `.session`                       | The page's mic session: `view()`, `toggle()`, `off()`, `subscribe(f)`.                        |
 
 Events (they bubble and cross shadow roots):
