@@ -942,21 +942,21 @@ are exported for that.
 
 ### Reference
 
-| Attribute / property             | Meaning                                                                                       |
-| -------------------------------- | --------------------------------------------------------------------------------------------- |
-| `stt-url` / `sttUrl`             | The STT endpoint (above).                                                                     |
-| `lang` / `lang`                  | The language hint (`?lang=`).                                                                 |
-| `.stt`                           | `(wav, info) => Promise<string \| { text }>`, used instead of `stt-url`.                      |
-| `.sttHeaders`, `.sttCredentials` | For the default request.                                                                      |
-| `vad-src`, `ort-src` / `.vad`    | Silero's source (above). None: the energy gate.                                               |
-| `aec`                            | `off`: no echo-cancelled barge-in; capture is held while the agent speaks (with a voice).     |
-| `tick`                           | A soft two-tone tick when a spoken sentence is sent (Web Audio; silent on a muted iPhone).    |
-| `storage-key`                    | The sessionStorage key of the reload flag (`liagent:mic`), read when the session is made.     |
-| `.box`                           | The `DictationTarget` (default: the closest `<liagent-chat>`).                                |
-| `.voice`                         | A `MicVoiceLink`: a voice output that reads replies hands-free (ducking, barge-in, the echo). |
-| `.strings`                       | The labels and error notes (`MIC_STRINGS_EN` lists them), e.g. translated.                    |
+| Attribute / property             | Meaning                                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `stt-url` / `sttUrl`             | The STT endpoint (above).                                                                              |
+| `lang` / `lang`                  | The language hint (`?lang=`).                                                                          |
+| `.stt`                           | `(wav, info) => Promise<string \| { text }>`, used instead of `stt-url`.                               |
+| `.sttHeaders`, `.sttCredentials` | For the default request.                                                                               |
+| `vad-src`, `ort-src` / `.vad`    | Silero's source (above). None: the energy gate.                                                        |
+| `aec`                            | `off`: no echo-cancelled barge-in; capture is held while the agent speaks (with a voice).              |
+| `tick`                           | A soft two-tone tick when a spoken sentence is sent (Web Audio; silent on a muted iPhone).             |
+| `storage-key`                    | The sessionStorage key of the reload flag (`liagent:mic`), read when the session is made.              |
+| `.box`                           | The `DictationTarget` (default: the closest `<liagent-chat>`).                                         |
+| `.voice`                         | A `MicVoiceLink`: a voice output that reads replies hands-free (ducking, barge-in, the echo).          |
+| `.strings`                       | The labels and error notes (`MIC_STRINGS_EN` lists them), e.g. translated.                             |
 | `.strings.rec`                   | Optional: a visible label under the icon while capturing (e.g. `"録音"`). Default none: the ring only. |
-| `.session`                       | The page's mic session: `view()`, `toggle()`, `off()`, `subscribe(f)`.                        |
+| `.session`                       | The page's mic session: `view()`, `toggle()`, `off()`, `subscribe(f)`.                                 |
 
 Events (they bubble and cross shadow roots):
 
