@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { TREE_ZH, UI_EN, UI_ZH, isZh, treeDefaults, uiStrings } from "../src/ui-strings.ts";
+import { TREE_ZH, UI_EN, UI_JA, UI_ZH, isZh, treeDefaults, uiStrings } from "../src/ui-strings.ts";
 
 describe("ui strings", () => {
-  it("picks Chinese for zh pages, English otherwise", () => {
+  it("picks Chinese for zh pages, Japanese for ja pages, English otherwise", () => {
     expect(isZh("zh")).toBe(true);
     expect(isZh("zh-CN")).toBe(true);
     expect(isZh("zh-Hant-TW")).toBe(true);
@@ -11,7 +11,8 @@ describe("ui strings", () => {
     expect(isZh(null)).toBe(false);
     expect(isZh(undefined)).toBe(false); // no document in tests
     expect(uiStrings("zh-CN")).toBe(UI_ZH);
-    expect(uiStrings("ja")).toBe(UI_EN);
+    expect(uiStrings("ja")).toBe(UI_JA);
+    expect(uiStrings("en")).toBe(UI_EN);
     expect(treeDefaults("zh")).toBe(TREE_ZH);
     expect(treeDefaults("en")).toEqual({});
   });

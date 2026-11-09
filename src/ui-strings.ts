@@ -388,14 +388,137 @@ export const TREE_ZH: TreeStrings = {
   live: "实时数据",
 };
 
+/** The box's strings in Japanese, picked on a ja page (taku 11-09: a Japanese UI shows Japanese). */
+export const UI_JA: UiStrings = {
+  stateTree: "状態ツリー",
+  closeTree: "状態ツリーを閉じる",
+  noTreeSource: "ツリーのソースがありません",
+  lastDone: "直近の完了",
+  nowDoing: "進行中",
+  upNext: "次",
+  needsYou: "あなた待ち",
+  items: "件",
+  polished: "整えました",
+  attachOpen: "追加・添付",
+  attachRemove: "添付を外す",
+  attachQuoted: "ページからの引用",
+  attachFile: "ファイル",
+  attachDrop: "ドロップして添付",
+  attachUploading: "アップロード中…",
+  attachFailed: "アップロードに失敗しました",
+  attachTooBig: "大きすぎます",
+  attachFileRemove: "このファイルを外す",
+  files: "ファイル",
+  filesEmpty: "まだ何もありません。",
+  filesUsage: "{size} 保存済み · {n} 件",
+  filesUsageQuota: "{quota} 中 {size} 使用 · {n} 件",
+  filesFailed: "ファイルを読み込めませんでした。",
+  filesProcessed: "処理済み",
+  filesDelete: "削除",
+  filesDeleteConfirm: "完全に削除しますか？",
+  filesKeep: "残す",
+  filesClose: "ファイルを閉じる",
+  echoOn: "エコーキャンセル：オン",
+  echoOff: "エコーキャンセル：オフ",
+  hintType: "ここに入力すると、入力をやめて {s} 秒後に送信されます。",
+  dragHint: "ドラッグ：移動 · タップ：最小化 · ダブルタップ：メニュー",
+  messageNode: "{node} にメッセージ…",
+  messageAgent: "エージェントにメッセージ…",
+  messageAgentLabel: "エージェントにメッセージ",
+  chatWithAgent: "エージェントとチャット",
+  markHint: "タップ：最小化・元に戻す · ダブルタップ：メニュー · ドラッグ：チャットを移動",
+  treeHint:
+    "タップ：状態ツリーの表示・非表示 · 右へドラッグ：選択中のノードを開く · 左へドラッグ：たたむ · 矢印キー：移動",
+  agentOfflineWaits: "エージェントはオフライン — メッセージは戻るまで待ちます…",
+  asksLabel: "エージェントの接続",
+  nodesLabel: "宛先のノード",
+  toMainThread: "代わりにメインスレッドへ送る",
+  statusUnavailable: "チャットを使えません",
+  statusNotConnected: "未接続 — 下書きは残っています",
+  statusReconnecting: "再接続中…",
+  statusListening: "エージェント待機中（{n}）",
+  statusAgentOffline: "エージェントはオフライン · 戻るまでメッセージは待ちます",
+  agentWorking: "エージェントが作業中",
+  askWhereAll: "すべてのページ（後で開くページを含む）で",
+  askWhereChosen: "選んだページで",
+  askFriend: "{where}1 時間コードを実行すること",
+  askEval: "{where}8 時間コードの実行とチャットをすること",
+  askChat: "30 日間あなたとチャットすること",
+  askOld: "ページでのコード実行、またはチャット",
+  askSentence:
+    "{label} が {what} を求めています。エージェントが同じコード {code} を示しているときだけ許可してください。",
+  tagCode1h: "コード · 1時間",
+  tagCode8h: "コード · 8時間",
+  tagChat30d: "チャット · 30日",
+  allow: "許可",
+  allowAllTitle: "すべてのページ（後で開くページを含む）で許可",
+  allowTickedTitle: "チェックしたページで許可",
+  allow8h: "8時間",
+  allow8hAllTitle: "すべてのページでのコードとチャットを 8 時間許可",
+  allow8hTitle: "コードとチャットを 8 時間許可",
+  chatOnly: "チャット",
+  chatOnlyTitle: "チャットのみ、30 日間",
+  deny: "拒否",
+  pagesAllLater: "すべてのページと後で開くページ",
+  thisPage: "（このページ）",
+  you: "あなた",
+  agentName: "エージェント",
+  speedLabel: "読み上げ速度",
+  speed: "速度",
+  readAloudMic: "返信を読み上げ（マイク オン）",
+  readAloud: "返信を読み上げ",
+  silent: "返信を読み上げない",
+  minimize: "–  最小化",
+  restore: "+  元に戻す",
+  minimizeChat: "チャットを最小化",
+  restoreChat: "チャットを元に戻す",
+  restoreChatNew: "チャットを元に戻す（新着 {n} 件）",
+  sessChat: "チャット",
+  sessPreview: "プレビュー",
+  sessEval: "eval",
+  allPages: "すべてのページ",
+  pagesOne: "1 ページ",
+  pagesN: "{n} ページ",
+  end: "終了",
+  openPages: "開いているページ",
+  endThisPage: "このページを終了しますか？",
+};
+
+/** The tree's strings in Japanese. */
+export const TREE_JA: TreeStrings = {
+  tree: "状態ツリー",
+  back: "チャットに戻る",
+  needsMe: "自分の対応待ち",
+  needsYou: "あなた待ち",
+  openCount: "未完了 {n} 件",
+  needsYouCount: "あなた待ち {n} 件",
+  copy: "コピー",
+  copied: "コピーしました",
+  loading: "読み込み中…",
+  failed: "状態ツリーを読み込めません",
+  empty: "状態ツリーは空です。",
+  nothingNeedsYou: "あなた待ちのものはありません。",
+  you: "あなた",
+  lastDone: "直近の完了",
+  nowDoing: "進行中",
+  upNext: "次",
+  live: "ライブデータ",
+};
+
+/** The page's language is Japanese. */
+export function isJa(lang: string | null | undefined = globalThis.document?.documentElement.lang) {
+  return /^ja\b/i.test(lang ?? "");
+}
+
 /** The page's language is Chinese. */
 export function isZh(lang: string | null | undefined = globalThis.document?.documentElement.lang) {
   return /^zh\b/i.test(lang ?? "");
 }
 
 /** The box's strings for the page's language. */
-export const uiStrings = (lang?: string | null): UiStrings => (isZh(lang) ? UI_ZH : UI_EN);
+export const uiStrings = (lang?: string | null): UiStrings =>
+  isZh(lang) ? UI_ZH : isJa(lang) ? UI_JA : UI_EN;
 
 /** The tree's defaults for the page's language, under the host's own. */
 export const treeDefaults = (lang?: string | null): Partial<TreeStrings> =>
-  isZh(lang) ? TREE_ZH : {};
+  isZh(lang) ? TREE_ZH : isJa(lang) ? TREE_JA : {};
