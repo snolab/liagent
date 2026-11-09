@@ -350,6 +350,17 @@ function request(ws: WebSocket, msg: unknown, type: string, ms = RESULT_MS): Pro
 }
 
 async function readText(): Promise<string> {
+  // A flag left after the command took its own is a mistake, never text to post:
+  // --help/-h prints usage; any other flag-like word is refused. "--" ends flags.
+  const end = args.indexOf("--");
+  const head = end === -1 ? args : args.slice(0, end);
+  if (head.some((a) => a === "--help" || a === "-h")) usage();
+  const bad = head.find((a) => /^--?[A-Za-z]/.test(a));
+  if (bad) {
+    console.error(`liagent: unknown flag ${bad} for ${cmd} (put text after "--" to send it as is)`);
+    usage(2);
+  }
+  if (end !== -1) args.splice(end, 1);
   const rest = args.join(" ");
   if (rest !== "-") return rest;
   return (await new Response(Bun.stdin.stream()).text()).trim();
@@ -494,6 +505,7 @@ async function main() {
   }
   if (cmd === "listen") return cmdListen(hub);
   if (cmd === "edit") {
+    if (args.includes("--help") || args.includes("-h")) usage();
     const last = args.includes("--last");
     if (last) args.splice(args.indexOf("--last"), 1);
     const id = last ? undefined : args.shift();

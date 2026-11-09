@@ -370,10 +370,6 @@ export function when(at: number, now = new Date()) {
   return day(d) === day(now) ? `${hm}:${pad(d.getSeconds())}` : `${day(d)} ${hm}`;
 }
 
-/** In the input while the mark is held. */
-const MARK_HINT = "Tap: minimize or restore · double-tap: menu · drag: move the chat";
-const TREE_HINT =
-  "Tap: show or hide the state tree · drag right: open the focused node deeper · drag left: fold it · arrow keys: move";
 /** The input grows to about five lines, then scrolls inside itself. */
 const INPUT_MAX_PX = 128;
 
@@ -1849,7 +1845,7 @@ export class ChatBox extends Base {
       style = `<style>${CSS}</style>`;
     }
     r.innerHTML = `${style}
-<section class="box halo" id="box" aria-label="Chat with the agent">
+<section class="box halo" id="box" aria-label="${this.ui.chatWithAgent}">
   <div class="column" id="column">
     <ol class="log" id="log"></ol>
   </div>
@@ -1860,13 +1856,13 @@ export class ChatBox extends Base {
   <div class="rowbox" id="rowbox">
     <div class="aim" id="aim" hidden></div>
     <div class="bar" id="bar">
-      <button type="button" class="tap mark" id="mark" title="${MARK_HINT}">${ICONS.mark}<span class="dot" id="dot"></span></button>
+      <button type="button" class="tap mark" id="mark" title="${this.ui.markHint}">${ICONS.mark}<span class="dot" id="dot"></span></button>
       <div class="cell" id="lead"></div>
-      <button type="button" class="tap treebtn" id="treebtn" aria-expanded="false" title="${TREE_HINT}">${ICONS.tree}<span class="evals" id="evals" aria-hidden="true" hidden></span><span class="thint" id="thint" role="status" hidden></span></button>
+      <button type="button" class="tap treebtn" id="treebtn" aria-expanded="false" title="${this.ui.treeHint}">${ICONS.tree}<span class="evals" id="evals" aria-hidden="true" hidden></span><span class="thint" id="thint" role="status" hidden></span></button>
       <button type="button" class="tap plus" id="plus" aria-haspopup="menu" aria-expanded="false" hidden>${ICONS.plus}</button>
       <div class="slot" id="slot">
         <div class="mirror" id="mirror" aria-hidden="true" hidden><span class="ghost" id="ghost"></span><span class="partial" id="partial"></span></div>
-        <textarea id="input" rows="1" maxlength="${MAX_CHAT}" aria-label="Message the agent"></textarea>
+        <textarea id="input" rows="1" maxlength="${MAX_CHAT}" aria-label="${this.ui.messageAgentLabel}"></textarea>
         <p class="notice" id="notice" role="status" hidden></p>
         <span class="spin" id="spin" role="status" hidden></span>
       </div>
@@ -2705,8 +2701,11 @@ export class ChatBox extends Base {
     b.classList.toggle("ran", this._evalRan);
     const kind = this._friend ? "preview" : "eval";
     this.els.treebtn!.title = evals.length
-      ? `${TREE_HINT}\n${evals.map((x) => `${kind}: ${x.label} · ${x.code}`).join("\n")}`
-      : TREE_HINT;
+      ? `${this.ui.treeHint}\n${evals.map((x) => `${kind}: ${x.label} · ${x.code}`).join("\n")}`
+      : this.ui.treeHint;
+    this.els.mark!.title = this.ui.markHint;
+    this.root.getElementById("box")?.setAttribute("aria-label", this.ui.chatWithAgent);
+    this.els.input?.setAttribute("aria-label", this.ui.messageAgentLabel);
   }
 
   /** The spinner in the input while the agent works. */

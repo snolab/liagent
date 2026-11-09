@@ -66,6 +66,14 @@ export type UiStrings = {
   messageNode: string;
   /** Placeholder. */
   messageAgent: string;
+  /** The input's accessible name. */
+  messageAgentLabel: string;
+  /** The box's accessible name. */
+  chatWithAgent: string;
+  /** The mark's tooltip. */
+  markHint: string;
+  /** The tree button's tooltip. */
+  treeHint: string;
   /** Placeholder with no agent listening. */
   agentOfflineWaits: string;
   /** Accessible name of the pairing requests. */
@@ -207,6 +215,11 @@ export const UI_EN: UiStrings = {
   dragHint: "drag: move · tap: minimize · double-tap: menu",
   messageNode: "Message {node}…",
   messageAgent: "Message the agent…",
+  messageAgentLabel: "Message the agent",
+  chatWithAgent: "Chat with the agent",
+  markHint: "Tap: minimize or restore · double-tap: menu · drag: move the chat",
+  treeHint:
+    "Tap: show or hide the state tree · drag right: open the focused node deeper · drag left: fold it · arrow keys: move",
   agentOfflineWaits: "Agent offline — your message waits for it…",
   asksLabel: "Agent connections",
   nodesLabel: "Nodes to address",
@@ -296,6 +309,10 @@ export const UI_ZH: UiStrings = {
   dragHint: "拖动：移动 · 轻点：最小化 · 双击：菜单",
   messageNode: "发给 {node}…",
   messageAgent: "给 agent 发消息…",
+  messageAgentLabel: "给 agent 发消息",
+  chatWithAgent: "与 agent 聊天",
+  markHint: "轻点：最小化或还原 · 双击：菜单 · 拖动：移动聊天框",
+  treeHint: "轻点：显示或隐藏状态树 · 向右拖：展开当前节点 · 向左拖：折叠 · 方向键：移动",
   agentOfflineWaits: "agent 离线，消息会等它回来…",
   asksLabel: "agent 连接",
   nodesLabel: "可发送的节点",
