@@ -400,3 +400,58 @@ describe("mic session: the resume outcome", () => {
     expect(MIC_SESSION_KEY).toBe("__liagentMic");
   });
 });
+
+describe("mic session: reopen and the page's hold", () => {
+  it("reopen gets a new stream with the new configuration; an explicit off wins", async () => {
+    const f = fakes();
+    const s = createMicSession(f.deps);
+    expect(await s.reopen()).toBe(false); // off: nothing to reopen
+    await s.toggle();
+    const first = s.stream()?.id;
+    expect(await s.reopen()).toBe(true);
+    expect(s.view().state).toBe("listening");
+    expect(s.stream()?.id).not.toBe(first);
+    expect(f.calls.gum).toBe(2);
+    // An off during a reopen: it stays off.
+    const p = s.reopen();
+    await s.off();
+    expect(await p).toBe(false);
+    expect(s.view().state).toBe("off");
+  });
+  it("the page's own audio holds capture together with the voice's hold", async () => {
+    const holds: boolean[] = [];
+    const f = fakes({
+      load: async (): Promise<Vad> => ({
+        start() {
+          holds.push(false);
+        },
+        pause() {
+          holds.push(true);
+        },
+        flush() {},
+        destroy() {},
+      }),
+    });
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    holds.length = 0;
+    s.setPageHold(true);
+    s.setPageHold(false);
+    await tick();
+    expect(holds).toEqual([true, false]);
+  });
+});
+
+describe("mic session: overlapping reopens", () => {
+  it("a reopen asked during another runs one more pass instead of being dropped", async () => {
+    const f = fakes();
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    const a = s.reopen();
+    const b = s.reopen();
+    expect(await a).toBe(true);
+    expect(await b).toBe(true);
+    expect(f.calls.gum).toBe(3); // the first open, then two passes
+    expect(s.view().state).toBe("listening");
+  });
+});

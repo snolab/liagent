@@ -59,7 +59,13 @@
 // Friends chat without approval, at most `friendChatMax` per
 // `friendWindowMs`; the owner can block one (block(), or the internal API).
 // A say's `quiet: true` (never read aloud) is copied onto its ChatMessage,
-// live and in history; anything but boolean true is dropped.
+// live and in history; anything but boolean true is dropped. A page line's
+// `context` (what the user attached: a selection, the page it came from,
+// files the host uploaded) is cleaned (cleanContext: known keys, each
+// bounded, http(s) or same-origin file URLs only) and kept on the message.
+// Its `attachments` (files the host's own store keeps: AttachmentRef ids,
+// names, types, sizes; never bytes) are cleaned (cleanAttachments) and kept
+// on owner lines only; a friend's line drops them.
 //
 // Pages. Each page socket has an id; `state` lists the audience's pages
 // ({id, label, at}) and the receiving page's own id (`self`). A page reports
@@ -103,6 +109,7 @@ import {
   CHAT_HISTORY,
   EVAL_GRANT_MS,
   CHAT_MS,
+  type ChatContext,
   type ChatMessage,
   type EditedEvent,
   type HubState,
@@ -919,7 +926,7 @@ export class ChatHub {
         len: m.text.length,
         ...this.head(m.text),
       });
-      if (page.thread !== OWNER_THREAD) return this.friendChat(ws, page, m.id, m.text);
+      if (page.thread !== OWNER_THREAD) return this.friendChat(ws, page, m.id, m.text, m.context);
       return this.post({
         id: m.id,
         from: "owner",
@@ -929,6 +936,8 @@ export class ChatHub {
         thread: OWNER_THREAD,
         ...(m.to ? { to: m.to } : {}),
         ...(m.source ? { source: m.source } : {}),
+        ...(m.context ? { context: m.context } : {}),
+        ...(m.attachments ? { attachments: m.attachments } : {}),
       });
     }
     if (m.type === "page") return this.relabel(ws, page, m.label);
@@ -972,7 +981,13 @@ export class ChatHub {
    * and more than friendChatMax in a window is dropped (and the page told).
    * Their first ever message tells the agents ({type:"friend-new"}).
    */
-  private async friendChat(ws: Socket, page: PageAtt, id: string, text: string) {
+  private async friendChat(
+    ws: Socket,
+    page: PageAtt,
+    id: string,
+    text: string,
+    context?: ChatContext,
+  ) {
     const t = this.now();
     const userId = page.thread;
     const rec = await this.ctx.storage.get<FriendRecord>(friendKey(userId));
@@ -1004,7 +1019,16 @@ export class ChatHub {
       log({ msg: "chat.friend-new", userId });
       for (const l of this.listeners()) send(l.ws, { type: "friend-new", userId, email, at: t });
     }
-    return this.post({ id, from: "friend", label: page.label, text, at: t, thread: userId, email });
+    return this.post({
+      id,
+      from: "friend",
+      label: page.label,
+      text,
+      at: t,
+      thread: userId,
+      email,
+      ...(context ? { context } : {}),
+    });
   }
 
   /** The pages an Allow names: live ones of the answering page's audience; by default that page. */

@@ -4,7 +4,31 @@
 //   const { defineChatBox, connectHub } = await import("https://…/liagent.js");
 //   defineChatBox();
 
-export { ChatBox, defineChatBox } from "./box.ts";
+export {
+  ChatBox,
+  defineChatBox,
+  type ActionHost,
+  type ActionPlace,
+  type ChatAction,
+  type FileActionOptions,
+  type MicPlacement,
+  type SelectionActionOptions,
+  type TreePlacement,
+  type UploadedFile,
+  type ChatFiles,
+  type FileItemAction,
+  type FilesListing,
+  type FilesUsage,
+  type MemoryFilesOptions,
+  type StoredFile,
+  memoryFiles,
+  fileAction,
+  mediaAction,
+  pageSelection,
+  selectionAction,
+} from "./box.ts";
+export { AEC_EVENT, aecOn, applyAec, setAec } from "./aec.ts";
+export { type PageAudio, pageAudio } from "./page-audio.ts";
 export { connectHub, type HubConnection, type HubOptions } from "./client.ts";
 export * from "./protocol.ts";
 export { DEBOUNCE_MS } from "./input.ts";

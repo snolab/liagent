@@ -11,14 +11,14 @@
 // Or let src/client.ts drive it from a hub: connectHub(box, url).
 //
 // What it does:
-//   - One bar, glass over the page: [mark | tree | input … | + | mic]. No title
+//   - One bar, glass over the page: [mark | tree | input … | mic]. No title
 //     bar. The mark (its dot is the connection): a tap minimizes or restores
 //     the box, a double tap opens the menu, a drag moves the box anywhere
 //     (kept on screen and remembered). The bar's own edge drags too.
 //     Minimized, the input's slot closes (a grid column, 1fr ⇄ 0fr, 180 ms;
 //     at once under reduced motion) and leaves [mark | tree | mic]; the input
 //     is inert and hidden from screen readers then. Targets are 40px; the tab
-//     order is mark → tree → input → attach → mic.
+//     order is mark → tree → input → mic.
 //   - The input is one line at rest (16px, so iOS never zooms), grows to five
 //     lines and then scrolls; it is measured again when its width changes.
 //   - One panel at a time: the menu (status, read-aloud and its speed 1× to
@@ -75,18 +75,51 @@
 //   - Quiet lines (src/speak-rules.ts): a line with `quiet: true` is never
 //     read; a hidden page never speaks, and hiding it stops the reading. A
 //     line kept silent fires `liagent-silent` {id, why}.
-//   - Attaching files (src/attach.ts): with `onAttach` set, a "+" sits after
-//     the input (hidden while minimized). It opens the file picker (multiple;
-//     `attachAccept` or the attach-accept attribute, e.g. "image/*,.pdf",
-//     limits the types; default any). Files dropped on the bar or pasted into
-//     the input go the same way. `liagent-attach` {files} fires first
-//     (bubbling, composed, cancelable: preventDefault() skips onAttach); then
-//     `onAttach(files)` runs, and a string it returns shows as the warning
-//     line. Unset, there is no button and drops and pastes stay native. The
-//     box never uploads anything itself.
 //   - Strings: Chinese on a zh page (src/ui-strings.ts); `strings` and
 //     `treeStrings` override them.
 //   - Text only: nothing a message holds is ever parsed as HTML.
+//
+// The bar's layout is slot-based: [mark | leading … | + | input … | trailing … | mic].
+//   - box.actions: the host's ChatActions (src/attach.ts), each placed in the
+//     + menu (`place: "menu"`, the default) or as a bar button at the start
+//     (`"leading"`) or end (`"trailing"`). An action does something
+//     (`onSelect`) or attaches something to the next line (`attach`: a
+//     selection, files the host uploaded); what is attached shows as a chip
+//     over the input (× drops it) and goes out as the line's `context`.
+//     The + shows when the menu has anything in it; its buttons keep the
+//     input's focus, so a phone's keyboard stays up.
+//   - box.files: the host's file handling (src/files.ts ChatFiles: upload,
+//     url, and optionally list, remove, actions, maxBytes). With it, files
+//     pasted into the input, dropped anywhere on the box (an overlay takes
+//     the drop) or picked with an upload action (fileAction() / mediaAction()
+//     without their own `upload`) show as chips over the input — a
+//     thumbnail or the file's extension, name, size, progress, × — and go
+//     out with the next line as `attachments` (refs, never bytes). A send
+//     waits for uploads still running; files alone go out with their names
+//     as the text. Sent lines show their files from `files.url(ref)`: safe
+//     image types inline, anything else as a link. With `files.list`, the +
+//     menu has a Files item: the stored files, the usage, a confirmed
+//     Delete (`files.remove`) and the host's own actions on each.
+//   - tree-placement ("leading", the default | "menu" | "hidden"): the tree
+//     button on the bar, as a + menu item, or not at all.
+//   - mic-placement ("trailing", the default | "leading" | "inside" |
+//     "hidden"): the slotted mic at the bar's end, its start, inside the
+//     input's cell (it then folds away with the input when minimized), or
+//     not shown.
+//   - Geometry: the bar's corner radius is derived, never set:
+//     R = border + padding + control / 2 (--liagent-bar-border, 1px;
+//     --liagent-bar-pad, 2px; --liagent-control, 2.125rem). A round control
+//     one line high in a corner is then concentric with the corner, at any
+//     size.
+//   - Typing glass: while the input has the focus, the box's own area (the
+//     shown log and the bar) gets a frosted backdrop; the rest of the page
+//     stays sharp and takes taps. Solid where backdrop-filter is missing or
+//     transparency is reduced; no fade under reduced motion. One frame:
+//     while the glass is up, the bar's own box is not drawn inside it
+//     (border transparent with its width kept, no tint, no blur), nor are
+//     the "@/" list's and the attached chip's; at rest they come back.
+//   - A log at its newest line stays there when it or the input changes
+//     size (src/log-pin.ts); only the user's own scroll leaves the end.
 //
 // Voice input (a separate element, e.g. <liagent-mic slot="mic">):
 //   - A child with slot="mic" lands in the bar's right end (a named shadow
@@ -108,11 +141,17 @@
 // Theming: set CSS custom properties on the element — --liagent-bg (the page
 // colour, for the halo and the translucent bar; default Canvas),
 // --liagent-fg, --liagent-agent (the spinner), --liagent-z (z-index, 40),
-// --liagent-width (min(20rem, 100vw - 1rem)), --liagent-avatar (18px).
+// --liagent-width (min(20rem, 100vw - 1rem)), --liagent-avatar (18px),
+// --liagent-control (one line of the bar, 2.125rem), --liagent-bar-border
+// (1px), --liagent-bar-pad (2px; 1px minimized: --liagent-bar-pad-min),
+// --liagent-menu-bg (the + menu's fill), --liagent-accent (the + menu's
+// badges and the quote line), and the mic's own (src/mic-button.ts).
 
 import {
   BUSY_AFTER_REPLY_MS,
   BUSY_MS,
+  type AttachmentRef,
+  type ChatContext,
   type ChatMessage,
   type EditedEvent,
   applyEdit,
@@ -126,12 +165,34 @@ import {
   draftSource,
   langTag,
   lineNode,
+  mergeContext,
   nodePath,
   parseAddress,
   pathLabel,
   pickLang,
   trimHistory,
 } from "./protocol.ts";
+import {
+  type ActionHost,
+  type ChatAction,
+  actionEnabled,
+  actionsAt,
+  menuGroups,
+  oneLine,
+} from "./attach.ts";
+import {
+  type ChatFiles,
+  type FilesListing,
+  type PendingFile,
+  createPendingFiles,
+  dragHasFiles,
+  fileBadge,
+  filesFrom,
+  formatSize,
+  isInlineImage,
+} from "./files.ts";
+import { repinEnd, stillAtEnd } from "./log-pin.ts";
+import { aecOn, applyAec } from "./aec.ts";
 import { DEBOUNCE_MS, afterChange, enterSends, lineBreakSends, partialTail } from "./input.ts";
 import { TREE_STRINGS_EN, type TreeSource, type TreeStrings, watchTree } from "./tree.ts";
 import { type TreeNode, frontier } from "./state-tree.ts";
@@ -170,7 +231,6 @@ import { createAxisLock, createDragFlag, createLongPress, createTapper } from ".
 import { type VoicePreference, createVoicePicker, readingLang, watchVoices } from "./voice-pick.ts";
 import { createSwipeHandoff, splitScroll, wheelPixels } from "./scroll-handoff.ts";
 import { type UiStrings, treeDefaults, uiStrings } from "./ui-strings.ts";
-import { type AttachHandler, attachFiles, filesOf, hasFiles } from "./attach.ts";
 import { RETIRED_SETTINGS, type SpeakMeta, pageHidden, silenceFor } from "./speak-rules.ts";
 import type { Assignee } from "./state-tree.ts";
 
@@ -185,8 +245,29 @@ export {
 } from "./avatar.ts";
 
 export type { VoicePreference } from "./voice-pick.ts";
-export type { AttachHandler } from "./attach.ts";
+export {
+  type ActionHost,
+  type ActionPlace,
+  type ChatAction,
+  type FileActionOptions,
+  type SelectionActionOptions,
+  type UploadedFile,
+  fileAction,
+  mediaAction,
+  pageSelection,
+  selectionAction,
+} from "./attach.ts";
 export type { Silence, SpeakMeta } from "./speak-rules.ts";
+export {
+  type AttachmentRef,
+  type ChatFiles,
+  type FileItemAction,
+  type FilesListing,
+  type FilesUsage,
+  type MemoryFilesOptions,
+  type StoredFile,
+  memoryFiles,
+} from "./files.ts";
 
 export type AnswerType = "allow" | "deny";
 /**
@@ -294,10 +375,12 @@ const ICONS = {
   speaker: `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M2 6h3l4-3v10l-4-3H2z"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.5 3.5a6 6 0 0 1 0 9" stroke="currentColor" fill="none" stroke-width="1.3"/></svg>`,
   /** The liagent mark: a speech bubble holding an "l", a spark at its top right. */
   mark: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h10a4 4 0 0 1 4 4v7a4 4 0 0 1-4 4h-7l-5 3v-3.6A4 4 0 0 1 3 14V7a4 4 0 0 1 4-4Z"/><path d="M10.5 6.5v8"/><path d="M15.5 5.6l.55 1.35 1.35.55-1.35.55-.55 1.35-.55-1.35-1.35-.55 1.35-.55Z" fill="oklch(0.72 0.17 150)" stroke="oklch(0.72 0.17 150)" stroke-width="1"/></svg>`,
-  /** A plus: the attach button. */
-  plus: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`,
+  /** A plus: the + menu. */
+  plus: `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>`,
   /** An outline tree (a root and two branches): the tree button. */
   tree: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="10" width="7" height="4.5" rx="1.5"/><rect x="14" y="16.5" width="7" height="4.5" rx="1.5"/><path d="M6.5 8v10.75H14M6.5 12.25H14"/></svg>`,
+  /** A tray: the + menu's stored files. */
+  files: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5.5 5h13L21 13v6H3v-6Z"/></svg>`,
 };
 
 const CSS = `
@@ -317,16 +400,40 @@ const CSS = `
   --muted: color-mix(in oklch, currentColor 55%, transparent);
   /* Lines straight over the page (floating, frontier): a stronger halo, never a fill. */
   --halo: 0 0 1px var(--bg), 0 0 2px var(--bg), 0 0 4px var(--bg), 0 0 8px var(--bg);
+  --accent: var(--liagent-accent, oklch(0.55 0.12 250));
+  /* Geometry: the corner radius follows from the control size, so a round
+     control one line high in a corner is concentric with it. */
+  --control: var(--liagent-control, 2.125rem);
+  --bar-b: var(--liagent-bar-border, 1px);
+  --bar-pad: var(--liagent-bar-pad, 2px);
+  --bar-r: calc(var(--bar-b) + var(--bar-pad) + var(--control) / 2);
 }
 * { box-sizing: border-box; }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 .halo { text-shadow: 0 0 3px var(--bg), 0 0 6px var(--bg); }
 .box {
+  position: relative;
   width: var(--liagent-width, min(20rem, calc(100vw - 1rem)));
   display: flex; flex-direction: column; pointer-events: none;
   opacity: .6; transition: opacity .15s;
 }
 .box:focus-within, .box:active, .box.on { opacity: 1; }
+/* The typing glass: the box's own area only, never the page around it. */
+.box::before {
+  content: ""; position: absolute; inset: -4px; z-index: -1; pointer-events: none;
+  border-radius: calc(var(--bar-r) + 4px);
+  background: color-mix(in oklch, var(--bg) 60%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklch, currentColor 16%, transparent);
+  backdrop-filter: blur(12px) saturate(1.4); -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  opacity: 0; visibility: hidden; transition: opacity .15s ease-out, visibility 0s linear .15s;
+}
+.box.typing::before { opacity: 1; visibility: visible; transition: opacity .15s ease-out, visibility 0s; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .box::before { background: color-mix(in oklch, var(--bg) 90%, transparent); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .box::before { background: color-mix(in oklch, var(--bg) 90%, transparent); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
 /* The one scroller: the tree (when open) on top, the log below. Compact at rest. */
 .column {
   max-height: 4.4rem; min-height: 3rem; overflow-y: auto; padding: 6px 8px;
@@ -390,13 +497,18 @@ img.av { display: block; object-fit: cover; }
 .min .rowbox { grid-template-columns: 0fr 1fr; }
 .bar {
   pointer-events: auto; position: relative; display: flex; align-items: flex-end;
-  padding: 2px; border-radius: 1.125rem; border: 1px solid var(--line); background: var(--glass);
+  padding: var(--bar-pad); border-radius: var(--bar-r); border: var(--bar-b) solid var(--line); background: var(--glass);
   backdrop-filter: blur(12px) saturate(1.5); -webkit-backdrop-filter: blur(12px) saturate(1.5);
   touch-action: none; text-shadow: none;
+  transition: border-color .15s ease-out, background-color .15s ease-out;
 }
-.min .bar { padding: 1px; }
+/* One frame while typing: the glass is the frame, so the bar's own box is not
+   drawn inside it. The border goes transparent (its width stays, so nothing
+   moves); its tint and blur go. At rest the border is back. */
+.box.typing .bar { border-color: transparent; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.min { --bar-pad: var(--liagent-bar-pad-min, 1px); }
 /* 40px targets: the hit area reaches 40px whatever the drawn size. */
-.tap { position: relative; flex: none; width: 40px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; }
+.tap { position: relative; flex: none; width: max(40px, var(--control)); height: var(--control); display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; }
 .tap::before { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%); }
 .mark, .treebtn { touch-action: none; cursor: grab; }
 .treebtn { cursor: pointer; }
@@ -413,7 +525,7 @@ img.av { display: block; object-fit: cover; }
 .min .slot { opacity: 0; max-height: 2rem; overflow: hidden; }
 textarea {
   pointer-events: auto; display: block; flex: 1; min-width: 0; resize: none; margin: 0; align-self: flex-end;
-  font: 16px/1.35 inherit; font-family: inherit; color: inherit; height: 2.125rem; min-height: 2.125rem; max-height: ${INPUT_MAX_PX}px;
+  font: 16px/1.35 inherit; font-family: inherit; color: inherit; height: var(--control); min-height: var(--control); max-height: ${INPUT_MAX_PX}px;
   padding: 4px 8px; border: 1px solid transparent; background: transparent; outline: none;
   overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
 }
@@ -433,10 +545,107 @@ textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent
   animation: rot .8s linear infinite;
 }
 @keyframes rot { to { transform: rotate(360deg); } }
-.mic { pointer-events: auto; flex: none; display: flex; align-items: center; min-height: 32px; }
-.attach { color: var(--muted); }
-.attach:hover, .attach:focus-visible { color: inherit; }
-.bar.drop { border-color: currentColor; }
+.mic { pointer-events: auto; flex: none; display: flex; align-items: center; min-height: var(--control); }
+.mic.inside { align-self: flex-end; }
+.cell { display: contents; }
+.act { color: var(--muted); font-size: 15px; line-height: 1; }
+.act:disabled { opacity: .4; cursor: default; }
+.act svg, .plus svg { width: 1em; height: 1em; }
+.plus { color: var(--muted); font-size: 18px; line-height: 1; }
+.plus[aria-expanded="true"] { color: inherit; }
+.min .plus { display: none; }
+.amenu {
+  pointer-events: auto; position: absolute; bottom: 100%; left: 0; margin-bottom: 4px; z-index: 1;
+  width: min(17rem, 100%); max-height: 60vh; overflow-y: auto; padding: 4px; text-shadow: none;
+  border-radius: calc(var(--bar-r) - 2px);
+  background: var(--liagent-menu-bg, color-mix(in oklch, var(--bg) 92%, transparent));
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 12px 32px -10px color-mix(in oklch, CanvasText 40%, transparent);
+}
+.amenu .head { padding: 6px 10px 2px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; opacity: .6; }
+.amenu .item { display: flex; width: 100%; min-height: 44px; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 12px; text-align: start; font-size: 13px; }
+.amenu .item:not(:disabled):hover, .amenu .item:focus-visible { background: color-mix(in oklch, currentColor 8%, transparent); }
+.amenu .item:disabled { opacity: .55; cursor: default; }
+.amenu .badge {
+  flex: none; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 14px; color: var(--accent); background: color-mix(in oklch, var(--accent) 14%, transparent);
+}
+.amenu .badge svg { width: 1em; height: 1em; }
+.amenu .lab { flex: 1; min-width: 0; }
+.amenu .lab > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.amenu .hint { font-size: 11px; color: var(--muted); }
+.attrow { pointer-events: auto; padding: 0 0 4px; }
+.attached {
+  display: flex; align-items: flex-start; gap: 4px; max-width: 100%; padding: 2px 2px 2px 8px; font-size: 11px; line-height: 1.35;
+  border-inline-start: 2px solid var(--accent); border-radius: 8px; background: color-mix(in oklch, var(--accent) 10%, var(--glass));
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+/* Inside the glass: the rail alone, no tinted box of its own. */
+.box.typing .attached { border-radius: 0; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.attached .what { flex: 1; min-width: 0; }
+.attached .x { all: unset; cursor: pointer; flex: none; padding: 0 6px; color: var(--muted); font-size: 13px; line-height: 1.35; }
+.quote, .attached .q {
+  all: unset; display: block; min-width: 0; max-width: 100%; cursor: pointer; pointer-events: auto;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted);
+}
+.quote.whole, .attached .q.whole { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 10rem; overflow-y: auto; }
+.quote { margin: 1px 0; padding-inline-start: 6px; border-inline-start: 2px solid color-mix(in oklch, var(--accent) 75%, transparent); font-size: 11px; }
+.files { display: flex; flex-wrap: wrap; gap: 4px; margin: 1px 0; font-size: 11px; }
+/* Files for the next line (box.files): chips over the input. */
+.filerow { pointer-events: auto; display: flex; flex-wrap: wrap; gap: 4px; padding: 0 0 4px; }
+.fchip {
+  position: relative; display: flex; align-items: center; gap: 6px; max-width: 14rem; overflow: hidden;
+  padding: 3px 2px 3px 3px; border-radius: 8px; font-size: 11px; line-height: 1.3;
+  background: color-mix(in oklch, var(--accent) 10%, var(--glass)); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.fchip .thumb { flex: none; width: 28px; height: 28px; border-radius: 5px; object-fit: cover; }
+.fchip .ext { display: inline-flex; align-items: center; justify-content: center; font-size: 9px; color: var(--muted); background: color-mix(in oklch, currentColor 8%, transparent); }
+.fchip .lab { flex: 1; min-width: 0; }
+.fchip .lab > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fchip .note { font-size: 10px; color: var(--muted); }
+.fchip .note.bad, .fpanel .bad { color: var(--liagent-danger, oklch(0.55 0.17 25)); }
+.fchip .x { all: unset; cursor: pointer; flex: none; padding: 0 6px; color: var(--muted); font-size: 13px; line-height: 24px; }
+.fchip .prog { position: absolute; inset-inline-start: 0; bottom: 0; height: 2px; background: var(--accent); transition: width .15s linear; }
+/* Files under a sent line: safe images inline, the rest as links. */
+.sfiles { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 2px 0; font-size: 11px; }
+.sfile { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; pointer-events: auto; }
+.sfile img { display: block; max-height: 8rem; max-width: 10rem; border-radius: 8px; object-fit: cover; }
+.sfile .fname { display: inline-flex; gap: 6px; max-width: 14rem; padding: 2px 8px; border-radius: 8px; color: inherit; text-decoration: none; background: color-mix(in oklch, var(--accent) 10%, transparent); }
+.sfile .fname .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sfile .fname .z { flex: none; color: var(--muted); }
+.fact { flex: none; padding: 3px 10px; border-radius: 999px; font-size: 11px; line-height: 1.3; color: oklch(1 0 0); background: var(--accent); }
+.fact.del { color: var(--liagent-danger, oklch(0.55 0.17 25)); background: color-mix(in oklch, currentColor 10%, transparent); }
+.fact.del.yes { color: oklch(1 0 0); background: var(--liagent-danger, oklch(0.55 0.17 25)); }
+/* The drop target: the whole box while files are dragged over the window. */
+.drop {
+  pointer-events: auto; position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center;
+  min-height: 6rem; padding: 8px; text-align: center; font-size: 13px; border-radius: var(--bar-r);
+  border: 2px dashed var(--accent); background: color-mix(in oklch, var(--accent) 16%, transparent);
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+}
+.drop[hidden] { display: none; }
+/* The + menu's Files: the stored files. */
+.fpanel {
+  pointer-events: auto; position: absolute; bottom: 100%; left: 0; margin-bottom: 4px; z-index: 1;
+  display: flex; flex-direction: column; width: min(20rem, 100%); max-height: min(24rem, 60vh); overflow: hidden;
+  padding: 4px; text-shadow: none; border-radius: calc(var(--bar-r) - 2px);
+  background: var(--liagent-menu-bg, color-mix(in oklch, var(--bg) 92%, transparent));
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 12px 32px -10px color-mix(in oklch, CanvasText 40%, transparent);
+}
+.fpanel[hidden] { display: none; }
+.fpanel .fhead { display: flex; align-items: center; padding: 4px 4px 0 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.fpanel .fhead span { flex: 1; opacity: .6; }
+.fpanel .fhead .x { padding: 4px 8px; font-size: 14px; color: var(--muted); }
+.fpanel .fusage, .fpanel .fline { padding: 2px 10px 4px; font-size: 11px; color: var(--muted); }
+.fpanel .fline.bad { color: var(--liagent-danger, oklch(0.55 0.17 25)); }
+.fpanel .frows { min-height: 0; overflow-y: auto; }
+.fpanel .frow { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; }
+.fpanel .frow .q { flex: 1; min-width: 0; }
+.fpanel .fwhat { flex: 1; min-width: 0; color: inherit; text-decoration: none; }
+.fpanel .fwhat > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fpanel .meta { font-size: 10px; color: var(--muted); }
+.files a, .files span { pointer-events: auto; color: inherit; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .unread {
   pointer-events: none; position: absolute; top: -6px; inset-inline-end: -6px; border-radius: 999px; padding: 0 4px;
   font-size: 10px; line-height: 16px; color: oklch(1 0 0); background: oklch(0.55 0.2 260);
@@ -452,6 +661,8 @@ textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent
 .target.preview { opacity: .7; }
 .target button { all: unset; cursor: pointer; line-height: 1; }
 .nodes { list-style: none; margin: 0; padding: 2px 0; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; font-size: 11px; background: var(--glass); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+/* Inside the glass: plain rows on it, no second box. */
+.box.typing .nodes { border-color: transparent; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
 .nodes button { all: unset; display: block; cursor: pointer; padding: 1px 8px; }
 /* Minimized: the tree, the floating lines and the frontier, on the bar's side. */
 .floatbox {
@@ -508,13 +719,25 @@ textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent
 .menu [aria-checked="false"] svg { opacity: .45; }
 ${TREE_CHIPS_CSS}
 @media (prefers-reduced-motion: reduce) {
-  .rowbox, .slot, .column, .box, .float.fading { transition: none; }
+  .rowbox, .slot, .column, .box, .box::before, .bar, .float.fading { transition: none !important; }
   .blink, .treepanel, .evals.ran { animation: none; }
 }
 [hidden] { display: none !important; }
 `;
 
-type Panel = "none" | "menu" | "tree";
+type Panel = "none" | "menu" | "tree" | "plus" | "files";
+/** Where the slotted mic goes (attribute mic-placement). */
+export type MicPlacement = "trailing" | "leading" | "inside" | "hidden";
+/** Where the tree button goes (attribute tree-placement). */
+export type TreePlacement = "leading" | "menu" | "hidden";
+const MIC_PLACES: readonly MicPlacement[] = ["trailing", "leading", "inside", "hidden"];
+const TREE_PLACES: readonly TreePlacement[] = ["leading", "menu", "hidden"];
+/** A glyph or a cloned Node: never HTML. */
+function iconNode(icon: string | Node | undefined, fallback: string): Node {
+  if (icon && typeof icon === "object") return icon.cloneNode(true);
+  return document.createTextNode(icon || fallback);
+}
+const keepFocus = (e: Event) => e.preventDefault();
 /** The shadow root's parts, by id. */
 type Els = Record<
   | "box"
@@ -537,10 +760,17 @@ type Els = Record<
   | "input"
   | "notice"
   | "spin"
-  | "attach"
-  | "file"
   | "mic"
   | "micslot"
+  | "att"
+  | "filerow"
+  | "drop"
+  | "fpanel"
+  | "picker"
+  | "lead"
+  | "trail"
+  | "plus"
+  | "amenu"
   | "unread"
   | "floatbox"
   | "ftree"
@@ -557,15 +787,21 @@ type FloatLife = ReturnType<typeof createFloatLife>;
 /** The chat box element. Plain properties in, callbacks out; see the file header. */
 export class ChatBox extends Base {
   static get observedAttributes() {
-    return ["mic-active"];
+    return ["mic-active", "mic-placement", "tree-placement"];
   }
   /**
    * Called with each draft that goes out, and the state-tree node it is
    * addressed to (absent = the main thread); `opts.source` is "stt" when the
-   * line is dictation, sent unchanged. Return false if it could not be sent
-   * (the draft is kept).
+   * line is dictation, sent unchanged; `opts.context` is what the user
+   * attached with the + menu; `opts.attachments` are the files stored
+   * through `box.files` for this line. Return false if it could not be sent
+   * (the draft, the attachment and the files are kept).
    */
-  onSend?: (text: string, to?: string, opts?: { source?: MessageSource }) => boolean;
+  onSend?: (
+    text: string,
+    to?: string,
+    opts?: { source?: MessageSource; context?: ChatContext; attachments?: AttachmentRef[] },
+  ) => boolean;
   /** The user answered a pairing request. */
   onAnswer?: (type: AnswerType, p: PairInfo, answer: Answer) => void;
   /** End was pressed on a session in the menu. */
@@ -591,13 +827,7 @@ export class ChatBox extends Base {
    * give the same to `voice({ lang, prefer })` instead.
    */
   voicePrefer?: VoicePreference | null;
-  /**
-   * The file picker's `accept` for the "+" button ("image/*,.pdf"; unset:
-   * the attach-accept attribute, else any file).
-   */
-  attachAccept?: string | null;
 
-  private _onAttach: AttachHandler | null = null;
   private _messages: ChatMessage[] = [];
   private _live = false;
   private _listeners = 0;
@@ -632,6 +862,33 @@ export class ChatBox extends Base {
   private _target = ROOT_NODE;
   /** Polished lines shown as first heard (their mark tapped). */
   private rawIds = new Set<string>();
+  /** The host's actions (+ menu items and bar buttons). */
+  private _actions: ChatAction[] = [];
+  private actionSubs: (() => void)[] = [];
+  /** What goes with the next line, and which actions attached it. */
+  private _attached: ChatContext | null = null;
+  private attachedBy = new Set<string>();
+  /** Quotes shown whole (tapped), by message id ("" = the chip's). */
+  private wholeQuotes = new Set<string>();
+  private noticeTimer?: ReturnType<typeof setTimeout>;
+  /** The host's file handling (src/files.ts); absent: no files. */
+  private _files?: ChatFiles;
+  /** Files for the next line: uploading or stored, removable until sent. */
+  private pendingFiles = createPendingFiles({
+    files: () => this._files,
+    objectUrl:
+      typeof URL !== "undefined" && typeof URL.createObjectURL === "function"
+        ? { create: (f) => URL.createObjectURL(f), revoke: (u) => URL.revokeObjectURL(u) }
+        : undefined,
+  });
+  /** A send waited for uploads: it goes once they are done. */
+  private waitFiles = false;
+  /** Files are being dragged over the window (the drop overlay is up). */
+  private dragging = 0;
+  /** The file list's state (the + menu's Files): loading, loaded, failed; which row asks to delete. */
+  private fileList: { data?: FilesListing; failed?: boolean; asking?: string } = {};
+  /** The log's re-pin scrolled it (its own scroll event is not the user's). */
+  private ownPin = false;
 
   private root?: ShadowRoot;
   private open = true;
@@ -828,6 +1085,83 @@ export class ChatBox extends Base {
   setTree(v: boolean) {
     this.setPanel(v ? "tree" : this.panel === "tree" ? "none" : this.panel);
   }
+  /**
+   * The host's actions (src/attach.ts ChatAction): + menu items, or bar
+   * buttons at the start or end (`place`). Replaced as a whole.
+   */
+  set actions(v: readonly ChatAction[] | undefined) {
+    for (const f of this.actionSubs.splice(0)) f();
+    this._actions = Array.isArray(v) ? v.filter((a) => a && typeof a.id === "string") : [];
+    for (const a of this._actions)
+      if (a.subscribe)
+        try {
+          this.actionSubs.push(a.subscribe(() => this.renderActions()));
+        } catch {}
+    this.renderActions();
+  }
+  get actions(): readonly ChatAction[] {
+    return this._actions;
+  }
+  /**
+   * The host's file handling (src/files.ts ChatFiles): paste, drop and the
+   * upload actions store files through it, sent lines show their files from
+   * its URLs, and the + menu's Files lists (and deletes) what it stored.
+   * Absent (the default): no files; upload actions show disabled.
+   */
+  set files(v: ChatFiles | null | undefined) {
+    this._files =
+      v && typeof v.upload === "function" && typeof v.url === "function" ? v : undefined;
+    if (!this._files) {
+      this.pendingFiles.take();
+      if (this.panel === "files") this.setPanel("none");
+    }
+    this.renderAll();
+  }
+  get files(): ChatFiles | undefined {
+    return this._files;
+  }
+  /** Upload these through `box.files` for the next line, as pasted or dropped files are. */
+  addFiles(list: readonly File[]) {
+    if (!this._files || this._notice) return;
+    this.pendingFiles.add(list);
+  }
+  /** Where the slotted mic goes. Attribute: mic-placement. */
+  get micPlacement(): MicPlacement {
+    const v = this.getAttribute?.("mic-placement") as MicPlacement | null;
+    return v && MIC_PLACES.includes(v) ? v : "trailing";
+  }
+  set micPlacement(v: MicPlacement) {
+    this.setAttribute("mic-placement", v);
+  }
+  /** Where the tree button goes. Attribute: tree-placement. */
+  get treePlacement(): TreePlacement {
+    const v = this.getAttribute?.("tree-placement") as TreePlacement | null;
+    return v && TREE_PLACES.includes(v) ? v : "leading";
+  }
+  set treePlacement(v: TreePlacement) {
+    this.setAttribute("tree-placement", v);
+  }
+  /** What goes with the next line (null: nothing). */
+  get attached(): ChatContext | null {
+    return this._attached;
+  }
+  /** Attach to the next line (merged with what is attached); null drops it all. */
+  attach(ctx: ChatContext | null, by?: string) {
+    if (!ctx) {
+      this._attached = null;
+      this.attachedBy.clear();
+    } else {
+      this._attached = mergeContext(this._attached, ctx) ?? this._attached;
+      if (by) this.attachedBy.add(by);
+    }
+    this.wholeQuotes.delete("");
+    this.renderAttached();
+  }
+  /** Open or close the + menu. */
+  setActionsMenu(v: boolean) {
+    this.setPanel(v ? "plus" : this.panel === "plus" ? "none" : this.panel);
+  }
+
   /** The box's own strings (English, or Chinese on a zh page, under these). */
   set strings(v: Partial<UiStrings> | undefined) {
     this._strings = v ?? {};
@@ -867,19 +1201,6 @@ export class ChatBox extends Base {
     if (same(this._user[k], v)) return;
     this._user = { ...this._user, [k]: v };
     this.renderLog();
-  }
-  /**
-   * Files the user attached (the "+" button, a drop on the bar, a paste):
-   * set it and the "+" shows. A string it returns (or resolves to) shows as
-   * the warning line. `liagent-attach` {files} fires first; preventDefault()
-   * there skips this. The box never uploads anything itself.
-   */
-  get onAttach(): AttachHandler | null {
-    return this._onAttach;
-  }
-  set onAttach(v: AttachHandler | null | undefined) {
-    this._onAttach = typeof v === "function" ? v : null;
-    this.renderAttach();
   }
   set placeholder(v: string) {
     this._placeholder = v;
@@ -932,6 +1253,7 @@ export class ChatBox extends Base {
   }
   attributeChangedCallback(name: string) {
     if (name === "mic-active") this.applyMic(this.hasAttribute("mic-active"));
+    else this.renderActions();
   }
   private applyMic(v: boolean) {
     if (v === this._micActive) return;
@@ -1020,6 +1342,10 @@ export class ChatBox extends Base {
     addEventListener("orientationchange", this.relayout);
     globalThis.visualViewport?.addEventListener("resize", this.relayout);
     document.addEventListener("visibilitychange", this.pageHid);
+    addEventListener("dragenter", this.dragEnter, true);
+    addEventListener("dragleave", this.dragLeave, true);
+    addEventListener("drop", this.dragDone, true);
+    addEventListener("dragend", this.dragDone, true);
     this.dropRetired();
     if (this.root) {
       this.loadTree();
@@ -1064,6 +1390,342 @@ export class ChatBox extends Base {
     removeEventListener("orientationchange", this.relayout);
     globalThis.visualViewport?.removeEventListener("resize", this.relayout);
     document.removeEventListener("visibilitychange", this.pageHid);
+    removeEventListener("dragenter", this.dragEnter, true);
+    removeEventListener("dragleave", this.dragLeave, true);
+    removeEventListener("drop", this.dragDone, true);
+    removeEventListener("dragend", this.dragDone, true);
+    this.dragging = 0;
+  }
+
+  // ---- files ------------------------------------------------------------------
+
+  /** Files can be added now: a host, the box open, the chat available. */
+  private takesFiles() {
+    return !!this._files && this.open && !this._notice;
+  }
+  /**
+   * Files dragged into the window: the whole box takes the drop (its log is
+   * click-through otherwise), so a dropped file uploads instead of its name
+   * landing in the input. Ends on a drop, or on leaving the window.
+   */
+  private dragEnter = (e: DragEvent) => {
+    if (!this.takesFiles() || !dragHasFiles(e.dataTransfer)) return;
+    this.setDragging(true);
+  };
+  private dragLeave = () => {
+    if (this.dragging) this.setDragging(this.dragging - 1 > 0, true);
+  };
+  private dragDone = () => this.setDragging(false);
+  private setDragging(on: boolean, leaving = false) {
+    this.dragging = on ? (leaving ? this.dragging - 1 : this.dragging + 1) : 0;
+    const d = this.els.drop;
+    if (!d) return;
+    d.hidden = !this.dragging || !this.takesFiles();
+    d.textContent = this.ui.attachDrop;
+  }
+  /** Open the device's file picker (an upload action's `accept`). */
+  private pickFiles(accept?: string) {
+    const el = this.els.picker as HTMLInputElement | undefined;
+    if (!el || !this._files) return;
+    el.accept = accept ?? "";
+    el.click();
+  }
+  /** Uploads finished: a held send goes now; files alone go after the usual pause. */
+  private afterUpload() {
+    if (this.pendingFiles.busy()) return;
+    if (this.waitFiles) {
+      this.waitFiles = false;
+      this.submit();
+    } else if (this.pendingFiles.ready() && !this._draft.trim()) this.armFiles();
+  }
+  /** Files alone, no draft: they go out after the debounce, as a typed line would. */
+  private armFiles() {
+    this.disarm();
+    if (this._micActive || this._partial || this.composing) return;
+    const bar = document.createElement("div");
+    bar.className = "drain";
+    bar.setAttribute("aria-hidden", "true");
+    bar.style.setProperty("--drain-ms", `${DEBOUNCE_MS}ms`);
+    this.els.bar?.prepend(bar);
+    this.timer = setTimeout(() => this.submit(), DEBOUNCE_MS);
+  }
+  /** Over the input: one chip per pending file, with its progress and an ×. */
+  private renderFiles() {
+    const row = this.els.filerow;
+    if (!row) return;
+    const list = this.pendingFiles.get();
+    row.hidden = !list.length || !this.open || !this._files;
+    row.replaceChildren(...list.map((f) => this.pendingChip(f)));
+  }
+  private pendingChip(f: PendingFile): HTMLElement {
+    const ui = this.ui;
+    const chip = document.createElement("div");
+    chip.className = "fchip";
+    chip.dataset.state = f.state;
+    if (f.state === "uploading") chip.title = ui.attachUploading;
+    if (f.thumb) {
+      const img = document.createElement("img");
+      img.className = "thumb";
+      img.alt = "";
+      img.src = f.thumb;
+      chip.append(img);
+    } else {
+      const b = document.createElement("span");
+      b.className = "thumb ext";
+      b.setAttribute("aria-hidden", "true");
+      b.textContent = fileBadge(f.name);
+      chip.append(b);
+    }
+    const lab = document.createElement("span");
+    lab.className = "lab";
+    const name = document.createElement("span");
+    name.textContent = f.name;
+    const note = document.createElement("span");
+    const bad =
+      f.state === "failed" ? ui.attachFailed : f.state === "too-big" ? ui.attachTooBig : "";
+    note.className = bad ? "note bad" : "note";
+    note.textContent = bad || formatSize(f.size);
+    lab.append(name, note);
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "x";
+    x.textContent = "×";
+    x.setAttribute("aria-label", ui.attachFileRemove);
+    x.addEventListener("pointerdown", keepFocus);
+    x.addEventListener("click", () => this.pendingFiles.remove(f.key));
+    chip.append(lab, x);
+    if (f.state === "uploading") {
+      const bar = document.createElement("span");
+      bar.className = "prog";
+      bar.setAttribute("aria-hidden", "true");
+      const pct = f.size ? Math.min(100, Math.round((f.sent / f.size) * 100)) : 0;
+      bar.style.width = `${pct}%`;
+      chip.append(bar);
+    }
+    return chip;
+  }
+  /** The host's actions on one stored file, as small buttons. */
+  private fileActions(r: AttachmentRef): HTMLElement[] {
+    let acts: { id: string; label: string; run: () => void }[] = [];
+    try {
+      acts = this._files?.actions?.(r) ?? [];
+    } catch {}
+    return acts.map((a) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "fact";
+      b.dataset.action = a.id;
+      b.textContent = a.label;
+      b.addEventListener("pointerdown", keepFocus);
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        try {
+          a.run();
+        } catch {}
+      });
+      return b;
+    });
+  }
+  /** Under a sent line: its images (inline) and files (links), from the host's URL, and the host's actions. */
+  private sentFiles(refs: readonly AttachmentRef[]): HTMLElement {
+    const out = document.createElement("span");
+    out.className = "sfiles";
+    for (const r of refs) {
+      let href = "";
+      try {
+        href = this._files?.url(r) ?? "";
+      } catch {}
+      // A URL the page can fetch: http(s), a path, or a blob: of this page.
+      const ok = /^(https?:\/\/|\/(?!\/)|blob:)/i.test(href);
+      const one = document.createElement("span");
+      one.className = "sfile";
+      if (ok && isInlineImage(r.type)) {
+        const a = document.createElement("a");
+        a.href = href;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.title = r.name;
+        const img = document.createElement("img");
+        img.src = href;
+        img.alt = r.name;
+        img.loading = "lazy";
+        a.append(img);
+        one.append(a);
+      } else {
+        const chip = document.createElement(ok ? "a" : "span");
+        chip.className = "fname";
+        if (ok) {
+          (chip as HTMLAnchorElement).href = href;
+          (chip as HTMLAnchorElement).rel = "noopener noreferrer";
+          (chip as HTMLAnchorElement).download = r.name;
+        }
+        chip.setAttribute("aria-label", `${this.ui.attachFile}: ${r.name}`);
+        const n = document.createElement("span");
+        n.className = "n";
+        n.textContent = r.name;
+        const z = document.createElement("span");
+        z.className = "z";
+        z.textContent = formatSize(r.size);
+        chip.append(n, z);
+        one.append(chip);
+      }
+      one.append(...this.fileActions(r));
+      out.append(one);
+    }
+    return out;
+  }
+  /** Open the + menu's Files: the stored files, loaded again each time (no polling). */
+  private openFileList() {
+    this.fileList = {};
+    this.setPanel("files");
+    const files = this._files;
+    files?.list?.().then(
+      (data) => {
+        if (this._files !== files || this.panel !== "files") return;
+        this.fileList = { data };
+        this.renderFileList();
+      },
+      () => {
+        if (this._files !== files || this.panel !== "files") return;
+        this.fileList = { failed: true };
+        this.renderFileList();
+      },
+    );
+  }
+  private deleteFile(id: string) {
+    const files = this._files;
+    this.fileList.asking = undefined;
+    this.renderFileList();
+    files?.remove?.(id).then(
+      () => {
+        const d = this.fileList.data;
+        if (!d) return;
+        const gone = d.items.find((x) => x.id === id);
+        const usage = d.usage &&
+          gone && {
+            ...d.usage,
+            bytes: Math.max(0, d.usage.bytes - gone.size),
+            items: Math.max(0, d.usage.items - 1),
+          };
+        this.fileList.data = {
+          items: d.items.filter((x) => x.id !== id),
+          ...(usage ? { usage } : d.usage ? { usage: d.usage } : {}),
+        };
+        this.renderFileList();
+      },
+      () => {
+        this.fileList.failed = true;
+        this.renderFileList();
+      },
+    );
+  }
+  /** The + menu's Files panel: usage, rows (download, host actions, a confirmed Delete), ×. */
+  private renderFileList() {
+    const p = this.els.fpanel;
+    if (!p) return;
+    const files = this._files;
+    p.hidden = this.panel !== "files" || !files?.list;
+    if (p.hidden || !files) return p.replaceChildren();
+    const ui = this.ui;
+    p.setAttribute("aria-label", ui.files);
+    const head = document.createElement("div");
+    head.className = "fhead";
+    const t = document.createElement("span");
+    t.textContent = ui.files;
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "x";
+    x.textContent = "×";
+    x.setAttribute("aria-label", ui.filesClose);
+    x.addEventListener("click", () => this.setPanel("none"));
+    head.append(t, x);
+    const nodes: Node[] = [head];
+    const { data, failed, asking } = this.fileList;
+    const line = (cls: string, text: string) => {
+      const d = document.createElement("div");
+      d.className = cls;
+      d.textContent = text;
+      nodes.push(d);
+    };
+    if (data?.usage) {
+      const u = data.usage;
+      line(
+        "fusage",
+        (u.quota ? ui.filesUsageQuota : ui.filesUsage)
+          .replace("{size}", formatSize(u.bytes))
+          .replace("{quota}", formatSize(u.quota ?? 0))
+          .replace("{n}", String(u.items)),
+      );
+    }
+    if (failed) line("fline bad", ui.filesFailed);
+    if (data && !data.items.length) line("fline", ui.filesEmpty);
+    const body = document.createElement("div");
+    body.className = "frows";
+    for (const r of data?.items ?? []) {
+      const row = document.createElement("div");
+      row.className = "frow";
+      row.dataset.id = r.id;
+      if (asking === r.id) {
+        row.classList.add("ask");
+        const q = document.createElement("span");
+        q.className = "q";
+        q.textContent = ui.filesDeleteConfirm;
+        const yes = document.createElement("button");
+        yes.type = "button";
+        yes.className = "fact del yes";
+        yes.textContent = ui.filesDelete;
+        yes.addEventListener("click", () => this.deleteFile(r.id));
+        const no = document.createElement("button");
+        no.type = "button";
+        no.className = "fact";
+        no.textContent = ui.filesKeep;
+        no.addEventListener("click", () => {
+          this.fileList.asking = undefined;
+          this.renderFileList();
+        });
+        row.append(q, yes, no);
+      } else {
+        let href = "";
+        try {
+          href = files.url(r);
+        } catch {}
+        const ok = /^(https?:\/\/|\/(?!\/)|blob:)/i.test(href);
+        const a = document.createElement(ok ? "a" : "span");
+        a.className = "fwhat";
+        if (ok) {
+          (a as HTMLAnchorElement).href = href;
+          (a as HTMLAnchorElement).rel = "noopener noreferrer";
+          (a as HTMLAnchorElement).download = r.name;
+        }
+        const n = document.createElement("span");
+        n.textContent = r.name;
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = [
+          formatSize(r.size),
+          new Date(r.at).toLocaleString(),
+          r.processedAt ? ui.filesProcessed : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        a.append(n, meta);
+        row.append(a, ...this.fileActions(r));
+        if (files.remove) {
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "fact del";
+          del.textContent = ui.filesDelete;
+          del.addEventListener("click", () => {
+            this.fileList.asking = r.id;
+            this.renderFileList();
+          });
+          row.append(del);
+        }
+      }
+      body.append(row);
+    }
+    nodes.push(body);
+    p.replaceChildren(...nodes);
   }
 
   /** The page hid (another tab, the app in the background, the screen locked): stop reading. */
@@ -1073,9 +1735,13 @@ export class ChatBox extends Base {
 
   /** A tap anywhere outside the menu and the mark closes the menu. */
   private outside = (e: Event) => {
-    if (this.panel !== "menu") return;
+    if (this.panel !== "menu" && this.panel !== "plus" && this.panel !== "files") return;
     const path = e.composedPath();
-    if (path.includes(this.els.menu!) || path.includes(this.els.mark!)) return;
+    if (this.panel === "files") {
+      if (path.includes(this.els.fpanel!) || path.includes(this.els.plus!)) return;
+    } else if (this.panel === "plus") {
+      if (path.includes(this.els.amenu!) || path.includes(this.els.plus!)) return;
+    } else if (path.includes(this.els.menu!) || path.includes(this.els.mark!)) return;
     this.setPanel("none");
   };
   /** Escape closes the open panel (caught first, so a mic's own Escape never sees it). */
@@ -1118,19 +1784,22 @@ export class ChatBox extends Base {
   </div>
   <div class="warn" id="warn" role="alert" hidden></div>
   <div class="asks" id="asks" aria-label="Agent connections"></div>
+  <div class="attrow" id="att" hidden></div>
+  <div class="filerow" id="filerow" hidden></div>
   <div class="rowbox" id="rowbox">
     <div class="aim" id="aim" hidden></div>
     <div class="bar" id="bar">
       <button type="button" class="tap mark" id="mark" title="${MARK_HINT}">${ICONS.mark}<span class="dot" id="dot"></span></button>
+      <div class="cell" id="lead"></div>
       <button type="button" class="tap treebtn" id="treebtn" aria-expanded="false" title="${TREE_HINT}">${ICONS.tree}<span class="evals" id="evals" aria-hidden="true" hidden></span><span class="thint" id="thint" role="status" hidden></span></button>
+      <button type="button" class="tap plus" id="plus" aria-haspopup="menu" aria-expanded="false" hidden>${ICONS.plus}</button>
       <div class="slot" id="slot">
         <div class="mirror" id="mirror" aria-hidden="true" hidden><span class="ghost" id="ghost"></span><span class="partial" id="partial"></span></div>
         <textarea id="input" rows="1" maxlength="${MAX_CHAT}" aria-label="Message the agent"></textarea>
         <p class="notice" id="notice" role="status" hidden></p>
         <span class="spin" id="spin" role="status" hidden></span>
       </div>
-      <button type="button" class="tap attach" id="attach" hidden>${ICONS.plus}</button>
-      <input type="file" id="file" multiple hidden tabindex="-1" aria-hidden="true">
+      <div class="cell" id="trail"></div>
       <div class="mic" id="mic" hidden><slot name="mic" id="micslot"></slot></div>
       <span class="unread" id="unread" hidden></span>
     </div>
@@ -1141,7 +1810,11 @@ export class ChatBox extends Base {
       <ul class="frontier" id="frontier"></ul>
     </div>
     <div class="menu" id="menu" role="menu" hidden></div>
+    <div class="amenu" id="amenu" role="menu" hidden></div>
+    <div class="fpanel" id="fpanel" role="dialog" hidden></div>
   </div>
+  <div class="drop" id="drop" hidden></div>
+  <input type="file" id="picker" multiple hidden />
 </section>`;
     for (const el of r.querySelectorAll<HTMLElement>("[id]")) this.els[el.id] = el;
     const { box, bar, mark, treebtn, column, floats, rowbox } = this.els as Els;
@@ -1182,8 +1855,12 @@ export class ChatBox extends Base {
     this.treeGestures(treebtn);
 
     column.addEventListener("scroll", () => this.onColumnScroll());
-    column.addEventListener("wheel", () => (this.userScrollAt = Date.now()), { passive: true });
-    column.addEventListener("touchmove", () => (this.userScrollAt = Date.now()), { passive: true });
+    const userScroll = () => {
+      this.userScrollAt = Date.now();
+      this.ownPin = false;
+    };
+    column.addEventListener("wheel", userScroll, { passive: true });
+    column.addEventListener("touchmove", userScroll, { passive: true });
     column.addEventListener("transitionend", (e) => {
       if (e.target !== column) return;
       // Shrunk: land on the newest lines again, now that the height settled.
@@ -1203,12 +1880,45 @@ export class ChatBox extends Base {
     floats.addEventListener("touchstart", () => this.holdFloats(true), { passive: true });
     floats.addEventListener("touchend", () => this.holdFloats(false), { passive: true });
 
-    micslot.addEventListener("slotchange", () => {
-      this.els.mic!.hidden = !micslot.assignedElements().length;
-    });
-    this.els.mic!.hidden = !micslot.assignedElements().length;
+    micslot.addEventListener("slotchange", () => this.renderActions());
 
-    this.attachInputs(bar, ta);
+    // The +: its buttons keep the input's focus (a phone's keyboard stays up).
+    const plus = this.els.plus!;
+    plus.addEventListener("pointerdown", keepFocus);
+    plus.addEventListener("click", () => this.setPanel(this.panel === "plus" ? "none" : "plus"));
+    this.els.amenu!.addEventListener("pointerdown", keepFocus);
+    this.els.fpanel!.addEventListener("pointerdown", keepFocus);
+
+    // Files: picked, pasted, or dropped anywhere on the box (src/files.ts).
+    const picker = this.els.picker as HTMLInputElement;
+    picker.addEventListener("change", () => {
+      this.addFiles(Array.from(picker.files ?? []));
+      picker.value = "";
+    });
+    ta.addEventListener("paste", (e) => {
+      if (!this._files) return;
+      const got = filesFrom(e.clipboardData);
+      if (!got.length) return;
+      e.preventDefault();
+      this.addFiles(got);
+    });
+    box.addEventListener("dragover", (e) => {
+      if (!this.takesFiles() || !dragHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    });
+    box.addEventListener("drop", (e) => {
+      this.setDragging(false);
+      if (!this.takesFiles()) return;
+      const got = filesFrom(e.dataTransfer);
+      if (!got.length) return;
+      e.preventDefault();
+      this.addFiles(got);
+    });
+    this.pendingFiles.subscribe(() => {
+      this.renderFiles();
+      this.afterUpload();
+    });
 
     if (typeof ResizeObserver !== "undefined") {
       let width = ta.clientWidth;
@@ -1218,11 +1928,14 @@ export class ChatBox extends Base {
             if (ta.clientWidth === width) continue;
             width = ta.clientWidth;
             this.fitInput();
-          } else this.placeFloat();
+          } else if (e.target === column || e.target === this.els.log) this.repin();
+          else this.placeFloat();
         }
       });
       this.ro.observe(ta);
       this.ro.observe(this.els.floatbox!);
+      this.ro.observe(column);
+      this.ro.observe(this.els.log!);
     }
 
     ta.addEventListener("input", () => {
@@ -1283,52 +1996,6 @@ export class ChatBox extends Base {
       this.submit();
     });
     this.swipeScrollsLog(ta);
-  }
-
-  /**
-   * The "+" opens the file picker; files dropped on the bar or pasted into
-   * the input go the same way (src/attach.ts). Only with `onAttach` set:
-   * otherwise drops and pastes are left to the browser, and so is any text.
-   */
-  private attachInputs(bar: HTMLElement, ta: HTMLTextAreaElement) {
-    const file = this.els.file as HTMLInputElement;
-    const takes = (dt: DataTransfer | null) => !!this._onAttach && !this._notice && hasFiles(dt);
-    this.els.attach!.addEventListener("click", () => {
-      if (!this._onAttach) return;
-      file.accept = this.attachAccept ?? this.getAttribute("attach-accept") ?? "";
-      file.click();
-    });
-    file.addEventListener("change", () => {
-      const files = filesOf(file);
-      file.value = ""; // the same file picked again fires again
-      this.attach(files);
-    });
-    bar.addEventListener("dragover", (e) => {
-      if (!takes(e.dataTransfer)) return;
-      e.preventDefault();
-      e.dataTransfer!.dropEffect = "copy";
-      bar.classList.add("drop");
-    });
-    bar.addEventListener("dragleave", (e) => {
-      if (!bar.contains(e.relatedTarget as Node | null)) bar.classList.remove("drop");
-    });
-    bar.addEventListener("drop", (e) => {
-      bar.classList.remove("drop");
-      if (!takes(e.dataTransfer)) return;
-      e.preventDefault();
-      this.attach(filesOf(e.dataTransfer));
-    });
-    // A paste with files (a copied picture or file) attaches them; text pastes as usual.
-    ta.addEventListener("paste", (e) => {
-      const files = filesOf(e.clipboardData);
-      if (!files.length || !takes(e.clipboardData)) return;
-      e.preventDefault();
-      this.attach(files);
-    });
-  }
-  private async attach(files: File[]) {
-    const note = await attachFiles(this, files, this._onAttach);
-    if (note !== undefined) this.warning = note;
   }
 
   /**
@@ -1668,15 +2335,43 @@ export class ChatBox extends Base {
         return false;
       }
     }
+    // Files still uploading: the line waits for them, and goes once they are stored.
+    if (this.pendingFiles.busy()) {
+      this.waitFiles = true;
+      return false;
+    }
+    const stored = this.pendingFiles.get().filter((p) => p.state === "done" && p.ref);
+    // Files alone: the line's text is their names (a line always has text).
+    if (!text && stored.length)
+      text = stored
+        .map((p) => p.name)
+        .join(", ")
+        .slice(0, MAX_CHAT);
     if (!text) return false;
     const to = this._target === ROOT_NODE ? undefined : this._target;
     const source = draftSource(this._draft, this.pure);
-    if (!this.onSend?.(text, to, source ? { source } : undefined)) {
+    const context = this._attached ?? undefined;
+    const attachments = stored.map((p) => p.ref!);
+    const opts =
+      source || context || attachments.length
+        ? {
+            ...(source ? { source } : {}),
+            ...(context ? { context } : {}),
+            ...(attachments.length ? { attachments } : {}),
+          }
+        : undefined;
+    if (!this.onSend?.(text, to, opts)) {
       this.offline = true;
       this.renderStatus();
       return false;
     }
     this.offline = false;
+    if (this.pendingFiles.get().length) this.pendingFiles.take();
+    if (context) {
+      // The line took it: the actions that attached it let it go (a kept selection…).
+      for (const a of this._actions) if (this.attachedBy.has(a.id)) a.sent?.();
+      this.attach(null);
+    }
     this.clearDraft();
     return true;
   }
@@ -1810,6 +2505,8 @@ export class ChatBox extends Base {
     if (opening) this.loadTree();
     this.renderLayout();
     this.renderMenu();
+    this.renderActions();
+    this.renderFileList();
     if (opening && this.open) this.els.column!.scrollTop = 0;
     requestAnimationFrame?.(() => this.fit());
   }
@@ -1844,6 +2541,9 @@ export class ChatBox extends Base {
     this.renderFrontier();
     this.renderStatus();
     this.renderMenu();
+    this.renderActions();
+    this.renderFiles();
+    this.renderFileList();
   }
 
   /** Open or minimized, which panel, the column's size: the box's frame. */
@@ -1853,6 +2553,9 @@ export class ChatBox extends Base {
     const ui = this.ui;
     box.classList.toggle("min", !this.open);
     box.classList.toggle("on", this._micActive || this.panel !== "none");
+    box.classList.toggle("typing", this.typing && this.open);
+    this.renderAttached();
+    this.renderFiles();
     column.hidden = !this.open;
     slot.toggleAttribute("inert", !this.open);
     if (this.open) slot.removeAttribute("aria-hidden");
@@ -1860,7 +2563,6 @@ export class ChatBox extends Base {
     mark.setAttribute("aria-expanded", String(this.open));
     treebtn.setAttribute("aria-expanded", String(this.panel === "tree"));
     treebtn.setAttribute("aria-label", ui.stateTree);
-    this.renderAttach();
     tree.setAttribute("aria-label", ui.stateTree);
     tclose.setAttribute("aria-label", ui.closeTree);
     // The tree: heading the column (expanded), or the float box (minimized).
@@ -2045,6 +2747,54 @@ export class ChatBox extends Base {
 
   /** A polished line's body (its text, or tapped, the raw STT text) and its sparkle. */
   private lineBody(m: ChatMessage, onToggle: () => void): Node[] {
+    const ctx = m.context ? this.contextNodes(m.context, m.id, onToggle) : [];
+    // Only the user's own lines carry stored files (the hub drops them elsewhere).
+    const files =
+      m.attachments?.length && m.from !== "agent" ? [this.sentFiles(m.attachments)] : [];
+    return [...ctx, ...files, ...this.lineText(m, onToggle)];
+  }
+  /** What a line carried (a quote, its files) above its text; text only, never HTML. */
+  private contextNodes(c: ChatContext, key: string, onToggle: () => void): Node[] {
+    const out: Node[] = [];
+    if (c.selection) {
+      const whole = this.wholeQuotes.has(key);
+      const q = document.createElement("button");
+      q.type = "button";
+      q.className = whole ? (key ? "quote whole" : "q whole") : key ? "quote" : "q";
+      q.setAttribute("aria-label", this.ui.attachQuoted);
+      q.setAttribute("aria-expanded", String(whole));
+      const where = [c.host, c.path].filter(Boolean).join("");
+      q.title = c.title ? `${c.title}${where ? ` · ${where}` : ""}` : where;
+      q.textContent = whole ? c.selection : oneLine(c.selection);
+      q.addEventListener("pointerdown", keepFocus);
+      q.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (!this.wholeQuotes.delete(key)) this.wholeQuotes.add(key);
+        onToggle();
+      });
+      out.push(q);
+    }
+    if (c.files?.length) {
+      const files = document.createElement("span");
+      files.className = "files";
+      for (const f of c.files) {
+        // Only http(s) and same-origin paths survive cleanContext; still checked here.
+        const ok = /^(https?:\/\/|\/(?!\/))/i.test(f.url);
+        const el = document.createElement(ok ? "a" : "span");
+        el.textContent = `📎 ${f.name}`;
+        el.setAttribute("aria-label", `${this.ui.attachFile}: ${f.name}`);
+        if (ok) {
+          (el as HTMLAnchorElement).href = f.url;
+          (el as HTMLAnchorElement).target = "_blank";
+          (el as HTMLAnchorElement).rel = "noopener noreferrer";
+        }
+        files.append(el);
+      }
+      out.push(files);
+    }
+    return out;
+  }
+  private lineText(m: ChatMessage, onToggle: () => void): Node[] {
     if (!m.edited || m.raw === undefined) return [document.createTextNode(m.text)];
     const raw = this.rawIds.has(m.id);
     const body = document.createElement("span");
@@ -2129,7 +2879,23 @@ export class ChatBox extends Base {
     const c = this.els.column;
     if (!c) return;
     c.classList.toggle("fade", c.scrollHeight > c.clientHeight + 1 || c.scrollTop > 0);
-    this.atEnd = c.scrollHeight - c.scrollTop - c.clientHeight < 4;
+    const gap = c.scrollHeight - c.scrollTop - c.clientHeight;
+    this.atEnd = stillAtEnd({ gap, ownPin: this.ownPin && this.atEnd, userScrolled: false });
+    if (gap < 4) this.ownPin = false;
+  }
+  /** The log or its lines changed size: a log at its end stays there (src/log-pin.ts). */
+  private repin() {
+    const c = this.els.column;
+    if (!c || !this.open) return;
+    const to = repinEnd({
+      atEnd: this.atEnd,
+      scrollTop: c.scrollTop,
+      scrollHeight: c.scrollHeight,
+      clientHeight: c.clientHeight,
+    });
+    if (to === null) return;
+    this.ownPin = true;
+    c.scrollTop = to;
   }
 
   /**
@@ -2330,17 +3096,186 @@ export class ChatBox extends Base {
     notice.hidden = !this._notice;
     notice.textContent = this._notice;
     this.els.input!.hidden = !!this._notice;
-    this.renderAttach();
     this.renderStatus();
   }
 
-  /** The "+" shows with `onAttach` set, the box open and the input there. */
-  private renderAttach() {
+  /** Over the bar: what goes with the next line, × to drop it. */
+  private renderAttached() {
+    const row = this.els.att;
+    if (!row) return;
+    row.replaceChildren();
+    row.hidden = !this._attached || !this.open;
+    if (this._attached) {
+      const att = document.createElement("div");
+      att.className = "attached";
+      const what = document.createElement("div");
+      what.className = "what";
+      what.append(...this.contextNodes(this._attached, "", () => this.renderAttached()));
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "x";
+      x.textContent = "×";
+      x.setAttribute("aria-label", this.ui.attachRemove);
+      x.addEventListener("pointerdown", keepFocus);
+      x.addEventListener("click", () => this.attach(null));
+      att.append(what, x);
+      row.append(att);
+    }
+  }
+  /** What an action's callbacks get. */
+  private actionHost(): ActionHost {
+    return {
+      attach: (ctx) => this.attach(ctx),
+      focus: () => (this.els.input as HTMLTextAreaElement | undefined)?.focus(),
+      close: () => this.setActionsMenu(false),
+      notice: (text) => {
+        clearTimeout(this.noticeTimer);
+        this.warning = text;
+        this.noticeTimer = setTimeout(() => (this.warning = ""), 4000);
+      },
+      addFiles: (list) => this.addFiles(list),
+      box: this as unknown as HTMLElement,
+    };
+  }
+  /** Run an action: onSelect, then attach (its result merged into the next line's context). */
+  private async runAction(a: ChatAction) {
+    if (!this.canRun(a)) return;
+    const host = this.actionHost();
+    // An upload action's picker opens first: a browser only opens one from the tap itself.
+    if (a.upload) this.pickFiles(a.accept);
+    try {
+      await a.onSelect?.(host);
+      if (a.attach) {
+        const ctx = await a.attach(host);
+        if (ctx) this.attach(ctx, a.id);
+      }
+    } catch (e) {
+      host.notice(e instanceof Error && e.message ? e.message : String(e));
+    }
+  }
+  /** Whether an action can be picked now: an upload action needs `box.files`. */
+  private canRun(a: ChatAction) {
+    return actionEnabled(a) && (!a.upload || this.takesFiles());
+  }
+  /** One bar button for an action. */
+  private actionButton(a: ChatAction): HTMLButtonElement {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "tap act";
+    b.dataset.action = a.id;
+    b.setAttribute("aria-label", a.label);
+    b.title = a.hint?.() || a.label;
+    b.disabled = !this.canRun(a);
+    b.append(iconNode(a.icon, a.label.slice(0, 1)));
+    b.addEventListener("pointerdown", keepFocus);
+    b.addEventListener("click", () => void this.runAction(a));
+    return b;
+  }
+  /** The bar's slots (leading, trailing, the mic's place, the tree's, the +) and the + menu. */
+  private renderActions() {
     if (!this.root) return;
-    const b = this.els.attach!;
-    b.hidden = !this._onAttach || !this.open || !!this._notice;
-    b.setAttribute("aria-label", this.ui.attach);
-    b.title = this.ui.attach;
+    const { bar, lead, trail, mic, slot, treebtn, plus, amenu, micslot } = this.els as Els;
+    lead.replaceChildren(...actionsAt(this._actions, "leading").map((a) => this.actionButton(a)));
+    trail.replaceChildren(...actionsAt(this._actions, "trailing").map((a) => this.actionButton(a)));
+    // The mic's place.
+    const where = this.micPlacement;
+    const slotted = (micslot as HTMLSlotElement).assignedElements?.().length ?? 0;
+    mic.hidden = !slotted || where === "hidden";
+    mic.classList.toggle("inside", where === "inside");
+    // Moved only when out of place: moving the slot fires slotchange, which renders again.
+    const [parent, before] =
+      where === "leading"
+        ? [bar, lead]
+        : where === "inside"
+          ? [slot, null]
+          : [bar, this.els.unread!];
+    if (mic.parentElement !== parent || mic.nextElementSibling !== before)
+      parent.insertBefore(mic, before);
+    // The tree button: on the bar, in the + menu, or nowhere.
+    treebtn.hidden = this.treePlacement !== "leading";
+    const menuTree = this.treePlacement === "menu";
+    const groups = menuGroups(this._actions);
+    const fileList = !!this._files?.list && !this._notice;
+    const any = groups.length > 0 || menuTree || fileList;
+    plus.hidden = !any;
+    plus.setAttribute("aria-label", this.ui.attachOpen);
+    plus.title = this.ui.attachOpen;
+    if (!any && this.panel === "plus") this.panel = "none";
+    plus.setAttribute("aria-expanded", String(this.panel === "plus"));
+    amenu.hidden = this.panel !== "plus";
+    amenu.setAttribute("aria-label", this.ui.attachOpen);
+    if (amenu.hidden) return;
+    amenu.replaceChildren();
+    const row = (
+      id: string,
+      label: string,
+      icon: Node,
+      hint: string | undefined,
+      on: boolean,
+      pick: () => void,
+    ) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "item";
+      b.setAttribute("role", "menuitem");
+      b.dataset.action = id;
+      b.disabled = !on;
+      if (!on) b.setAttribute("aria-disabled", "true");
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.setAttribute("aria-hidden", "true");
+      badge.append(icon);
+      const lab = document.createElement("span");
+      lab.className = "lab";
+      const t = document.createElement("span");
+      t.textContent = label;
+      lab.append(t);
+      if (hint) {
+        const h = document.createElement("span");
+        h.className = "hint";
+        h.textContent = hint;
+        lab.append(h);
+      }
+      b.append(badge, lab);
+      b.addEventListener("click", () => {
+        if (b.disabled) return;
+        this.setPanel("none");
+        pick();
+      });
+      amenu.append(b);
+    };
+    if (menuTree) {
+      const icon = document.createElement("span");
+      icon.innerHTML = ICONS.tree;
+      row("tree", this.ui.stateTree, icon, undefined, true, () => this.setPanel("tree"));
+    }
+    if (fileList) {
+      const icon = document.createElement("span");
+      icon.innerHTML = ICONS.files;
+      row("files", this.ui.files, icon, undefined, true, () => this.openFileList());
+    }
+    for (const g of groups) {
+      if (g.group) {
+        const head = document.createElement("div");
+        head.className = "head";
+        head.textContent = g.group;
+        amenu.append(head);
+      }
+      for (const a of g.items) {
+        let hint: string | undefined;
+        try {
+          hint = a.hint?.();
+        } catch {}
+        row(
+          a.id,
+          a.label,
+          iconNode(a.icon, "+"),
+          hint,
+          this.canRun(a),
+          () => void this.runAction(a),
+        );
+      }
+    }
   }
 
   private renderMenu() {
@@ -2397,6 +3332,17 @@ export class ChatBox extends Base {
       rate.append(b);
     }
     menu.append(status, speak, rate);
+    // Echo cancellation (src/aec.ts), when a mic is in the box: a tap reopens an open mic.
+    if ((this.els.micslot as HTMLSlotElement).assignedElements?.().length) {
+      const aec = document.createElement("button");
+      aec.type = "button";
+      aec.setAttribute("role", "menuitemcheckbox");
+      const on = aecOn();
+      aec.setAttribute("aria-checked", String(on));
+      aec.textContent = on ? this.ui.echoOn : this.ui.echoOff;
+      aec.addEventListener("click", () => void applyAec(!on).then(() => this.renderMenu()));
+      menu.append(aec);
+    }
     if (this._treeSource) {
       const tree = document.createElement("button");
       tree.type = "button";

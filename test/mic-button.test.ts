@@ -7,6 +7,7 @@ import {
   dictate,
   isDictationTarget,
   micLabel,
+  micLive,
 } from "../src/mic-button.ts";
 import {
   AEC_CONSTRAINTS,
@@ -103,6 +104,19 @@ describe("micLabel", () => {
   });
 });
 
+describe("micLive", () => {
+  it("says the coarse state only: the same while listening and capturing", () => {
+    expect(micLive({ state: "off" }, "idle")).toBe("");
+    expect(micLive({ state: "loading" }, "loading")).toBe("");
+    expect(micLive({ state: "listening" }, "listening")).toBe(MIC_STRINGS_EN.liveListening);
+    expect(micLive({ state: "capturing" }, "capturing")).toBe(MIC_STRINGS_EN.liveListening);
+    expect(micLive({ state: "listening" }, "speaking")).toBe(MIC_STRINGS_EN.liveSpeaking);
+  });
+  it("puts no text on the button", () => {
+    expect(Object.values(MIC_STRINGS_EN)).not.toContain("REC");
+  });
+});
+
 describe("the element outside a browser", () => {
   it("imports and defines nothing without customElements (server rendering)", () => {
     expect(defineMic()).toBe(MicElement);
@@ -112,10 +126,14 @@ describe("the element outside a browser", () => {
 });
 
 describe("mic-audio", () => {
-  it("AEC constraints: echo cancellation, noise suppression and auto gain on; off drops auto gain", () => {
+  it("AEC constraints: echo cancellation, noise suppression and auto gain on; off turns all three off", () => {
     expect(micConstraints()).toEqual({ ...AEC_CONSTRAINTS });
     expect(micConstraints(false)).toEqual({ ...LEGACY_CONSTRAINTS });
-    expect("autoGainControl" in micConstraints(false)).toBe(false);
+    expect(micConstraints(false)).toMatchObject({
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    });
   });
 
   it("keeps what the browser applied to the track, without device ids", () => {

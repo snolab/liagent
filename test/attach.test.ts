@@ -1,98 +1,268 @@
 import { describe, expect, it } from "bun:test";
-import { ATTACH_EVENT, attachFiles, filesOf, hasFiles } from "../src/attach.ts";
+import {
+  type ChatAction,
+  type ElLike,
+  type SelectionDoc,
+  SELECTION_TTL_MS,
+  actionEnabled,
+  actionsAt,
+  createSelectionMemory,
+  fileAction,
+  isSensitive,
+  menuGroups,
+  readSelection,
+  selectionAction,
+} from "../src/attach.ts";
+import { MAX_SELECTION } from "../src/protocol.ts";
 
-const photo = () => new File(["x"], "photo.jpg", { type: "image/jpeg" });
-const notes = () => new File(["hello"], "notes.txt", { type: "text/plain" });
+const a = (id: string, more: Partial<ChatAction> = {}): ChatAction => ({ id, label: id, ...more });
 
-describe("files in a transfer or a paste", () => {
-  it("sees files by their list or, while dragging, by the Files type", () => {
-    expect(hasFiles({ files: [photo()] })).toBe(true);
-    // During dragover the list is empty; only the types say files are coming.
-    expect(hasFiles({ files: [], types: ["Files"] })).toBe(true);
-    expect(hasFiles({ files: [], types: ["text/plain", "text/html"] })).toBe(false);
-    expect(hasFiles({})).toBe(false);
-    expect(hasFiles(null)).toBe(false);
-    expect(hasFiles(undefined)).toBe(false);
+describe("actions: where each goes", () => {
+  it("places by `place` (menu by default), in the host's order, a duplicate id once", () => {
+    const list = [
+      a("sel"),
+      a("tree", { place: "leading" }),
+      a("file", { group: "Attach" }),
+      a("sel", { place: "trailing" }),
+      a("status", { place: "trailing" }),
+    ];
+    expect(actionsAt(list, "menu").map((x) => x.id)).toEqual(["sel", "file"]);
+    expect(actionsAt(list, "leading").map((x) => x.id)).toEqual(["tree"]);
+    expect(actionsAt(list, "trailing").map((x) => x.id)).toEqual(["status"]);
   });
-
-  it("lists the files, in order, or none", () => {
-    const a = photo();
-    const b = notes();
-    expect(filesOf({ files: [a, b] })).toEqual([a, b]);
-    expect(filesOf({ files: null, types: ["text/plain"] })).toEqual([]);
-    expect(filesOf(null)).toEqual([]);
+  it("a feature moves from the bar into the menu by its place alone", () => {
+    const tree = a("tree", { place: "leading" });
+    expect(actionsAt([tree], "menu")).toEqual([]);
+    expect(actionsAt([{ ...tree, place: "menu" }], "menu").map((x) => x.id)).toEqual(["tree"]);
+  });
+  it("groups the menu: ungrouped first, then each group in first-seen order", () => {
+    const g = menuGroups([
+      a("x", { group: "Add" }),
+      a("y"),
+      a("z", { group: "Attach" }),
+      a("w", { group: "Add" }),
+    ]);
+    expect(g.map((x) => [x.group, x.items.map((i) => i.id)])).toEqual([
+      [undefined, ["y"]],
+      ["Add", ["x", "w"]],
+      ["Attach", ["z"]],
+    ]);
+  });
+  it("enabled(): absent is on; false or a throw is off", () => {
+    expect(actionEnabled(a("x"))).toBe(true);
+    expect(actionEnabled(a("x", { enabled: () => false }))).toBe(false);
+    expect(
+      actionEnabled(
+        a("x", {
+          enabled: () => {
+            throw new Error("boom");
+          },
+        }),
+      ),
+    ).toBe(false);
   });
 });
 
-describe("handing files to the host", () => {
-  it("fires liagent-attach (bubbling, composed, cancelable), then calls onAttach", async () => {
-    const t = new EventTarget();
-    const files = [photo(), notes()];
-    const order: string[] = [];
-    let seen: Event | undefined;
-    t.addEventListener(ATTACH_EVENT, (e) => {
-      seen = e;
-      order.push("event");
+// A fake DOM: elements with a chat flag and a sensitive flag.
+type FakeEl = ElLike & { chat?: boolean; sensitive?: boolean };
+const el = (o: Partial<FakeEl> = {}): FakeEl => ({
+  nodeType: 1,
+  tagName: "P",
+  closest: (sel: string) =>
+    (sel.includes("data-sensitive") && o.sensitive) || (sel.includes("liagent-chat") && o.chat)
+      ? {}
+      : null,
+  ...o,
+});
+
+function fakeDoc() {
+  const handlers = new Map<string, (e: { target: unknown }) => void>();
+  const state = {
+    active: null as FakeEl | null,
+    text: "",
+    anchor: el() as FakeEl,
+    fenced: [] as unknown[],
+    crosses: false,
+  };
+  const doc: SelectionDoc = {
+    get activeElement() {
+      return state.active;
+    },
+    getSelection: () => ({
+      rangeCount: state.text ? 1 : 0,
+      isCollapsed: !state.text,
+      anchorNode: state.anchor,
+      focusNode: state.anchor,
+      toString: () => state.text,
+      getRangeAt: () => ({ intersectsNode: () => state.crosses }),
+    }),
+    querySelectorAll: () => state.fenced,
+    addEventListener: (t, f) => void handlers.set(t, f),
+    removeEventListener: (t) => void handlers.delete(t),
+  };
+  return { doc, state, handlers };
+}
+const inChat = (n: unknown) => !!(n as FakeEl | null)?.chat;
+
+describe("page selection", () => {
+  it("never reads password, one-time-code or card fields, or [data-sensitive]", () => {
+    expect(isSensitive(el({ tagName: "INPUT", type: "password" }))).toBe(true);
+    expect(isSensitive(el({ tagName: "INPUT", getAttribute: () => "one-time-code" }))).toBe(true);
+    expect(isSensitive(el({ tagName: "INPUT", getAttribute: () => "cc-number" }))).toBe(true);
+    expect(isSensitive(el({ sensitive: true }))).toBe(true);
+    expect(isSensitive(el({ tagName: "INPUT", type: "text", getAttribute: () => null }))).toBe(
+      false,
+    );
+  });
+  it("reads a field's selected text, and leaves a sensitive field alone", () => {
+    const { doc, state } = fakeDoc();
+    state.active = el({
+      tagName: "TEXTAREA",
+      value: "hello world",
+      selectionStart: 6,
+      selectionEnd: 11,
     });
-    const note = await attachFiles(t, files, (f) => {
-      order.push("onAttach");
-      expect(f).toBe(files);
-      return `uploaded ${f.length} files`;
+    expect(readSelection({ doc, inChat })).toBe("world");
+    state.active = el({
+      tagName: "INPUT",
+      type: "password",
+      value: "secret",
+      selectionStart: 0,
+      selectionEnd: 6,
     });
-    expect(order).toEqual(["event", "onAttach"]);
-    expect(seen).toBeInstanceOf(CustomEvent);
-    expect((seen as CustomEvent).detail).toEqual({ files });
-    expect(seen!.bubbles).toBe(true);
-    expect(seen!.composed).toBe(true);
-    expect(seen!.cancelable).toBe(true);
-    expect(note).toBe("uploaded 2 files");
+    expect(readSelection({ doc, inChat })).toBeNull();
   });
-
-  it("skips onAttach when a listener calls preventDefault", async () => {
-    const t = new EventTarget();
-    t.addEventListener(ATTACH_EVENT, (e) => e.preventDefault());
-    let called = false;
-    const note = await attachFiles(t, [photo()], () => {
-      called = true;
-      return "never";
+  it("a host's own fence covers fields and selections too", () => {
+    const { doc, state } = fakeDoc();
+    const priv = (o: Partial<FakeEl>) =>
+      el({ ...o, closest: (sel: string) => (sel.includes(".private") ? {} : null) });
+    state.active = priv({
+      tagName: "TEXTAREA",
+      value: "secret",
+      selectionStart: 0,
+      selectionEnd: 6,
     });
-    expect(called).toBe(false);
-    expect(note).toBeUndefined();
+    expect(readSelection({ doc, inChat, fence: ".private" })).toBeNull();
+    state.active = null;
+    state.text = "secret";
+    state.anchor = priv({});
+    expect(readSelection({ doc, inChat, fence: ".private" })).toBeNull();
+    expect(readSelection({ doc, inChat })).toBe("secret");
   });
-
-  it("awaits an async handler; no string or an empty one is no note", async () => {
-    const t = new EventTarget();
-    expect(await attachFiles(t, [photo()], async () => "done")).toBe("done");
-    expect(await attachFiles(t, [photo()], async () => {})).toBeUndefined();
-    expect(await attachFiles(t, [photo()], () => "")).toBeUndefined();
+  it("a fence added later (another caller's) applies too, and drops what was kept", () => {
+    const { doc, state } = fakeDoc();
+    const memory = createSelectionMemory({ doc, inChat, where: () => ({}) });
+    state.text = "secret";
+    state.anchor = el({ closest: (sel: string) => (sel.includes(".private") ? {} : null) });
+    memory._events.onChange();
+    expect(memory.get()?.selection).toBe("secret");
+    selectionAction({ memory, fence: ".private" });
+    expect(memory.get()).toBeNull();
+    memory._events.onChange();
+    expect(memory.get()).toBeNull();
   });
-
-  it("turns a throw or a rejection into the note", async () => {
-    const t = new EventTarget();
-    const thrown = await attachFiles(t, [photo()], () => {
-      throw new Error("too large");
+  it("a selection in the chat, or one crossing a fenced part, is left alone", () => {
+    const { doc, state } = fakeDoc();
+    state.text = "inside";
+    state.anchor = el({ chat: true });
+    expect(readSelection({ doc, inChat })).toBeNull();
+    state.anchor = el();
+    state.fenced = [{}];
+    state.crosses = true;
+    expect(readSelection({ doc, inChat })).toBeNull();
+    state.crosses = false;
+    expect(readSelection({ doc, inChat })).toBe("inside");
+  });
+  it("remembers the last selection while the chat takes the focus, caps it, forgets it later", () => {
+    const { doc, state } = fakeDoc();
+    let now = 1000;
+    const m = createSelectionMemory({
+      doc,
+      inChat,
+      where: () => ({ path: "/docs/page?q=1#x", title: "  A   page " }),
+      now: () => now,
     });
-    expect(thrown).toBe("too large");
-    const rejected = await attachFiles(t, [photo()], () => Promise.reject("offline"));
-    expect(rejected).toBe("offline");
+    m.start();
+    state.text = `  ${"x".repeat(MAX_SELECTION + 50)}  `;
+    m._events.onChange();
+    const got = m.get()!;
+    expect(got.selection.length).toBe(MAX_SELECTION);
+    expect(got.path).toBe("/docs/page");
+    expect(got.title).toBe("A page");
+    // The input takes the focus: the page's selection collapses, the memory keeps it.
+    m._events.onDown({ target: el({ chat: true }) });
+    state.text = "";
+    state.active = el({ chat: true });
+    m._events.onChange();
+    expect(m.get()).not.toBeNull();
+    // Too old: gone.
+    now += SELECTION_TTL_MS + 1;
+    expect(m.get()).toBeNull();
   });
-
-  it("fires the event even without onAttach, for hosts that only listen", async () => {
-    const t = new EventTarget();
-    let got: File[] = [];
-    t.addEventListener(ATTACH_EVENT, (e) => (got = (e as CustomEvent).detail.files));
-    const files = [notes()];
-    expect(await attachFiles(t, files)).toBeUndefined();
-    expect(got).toBe(files);
+  it("a press elsewhere on the page that leaves nothing selected lets it go", () => {
+    const { doc, state } = fakeDoc();
+    const m = createSelectionMemory({ doc, inChat, where: () => ({}) });
+    state.text = "words";
+    m._events.onChange();
+    expect(m.get()?.selection).toBe("words");
+    m._events.onDown({ target: el() });
+    state.text = "";
+    state.active = null;
+    m._events.onChange();
+    expect(m.get()).toBeNull();
   });
+  it("selectionAction: on only with a selection, attaches it with its page, a send lets it go", async () => {
+    const { doc, state } = fakeDoc();
+    const memory = createSelectionMemory({
+      doc,
+      inChat,
+      where: () => ({ path: "/p", title: "T" }),
+    });
+    const act = selectionAction({ memory });
+    expect(actionEnabled(act)).toBe(false);
+    expect(act.hint?.()).toBe("Select text on the page first");
+    let changed = 0;
+    act.subscribe?.(() => changed++);
+    state.text = "a  quote\nhere";
+    memory._events.onChange();
+    expect(changed).toBe(1);
+    expect(actionEnabled(act)).toBe(true);
+    expect(act.hint?.()).toBe("“a quote here”");
+    const ctx = await act.attach?.({} as never);
+    expect(ctx).toEqual({ selection: "a  quote\nhere", path: "/p", title: "T" });
+    act.sent?.();
+    expect(memory.get()).toBeNull();
+  });
+});
 
-  it("does nothing for no files", async () => {
-    const t = new EventTarget();
-    let fired = false;
-    t.addEventListener(ATTACH_EVENT, () => (fired = true));
-    let called = false;
-    expect(await attachFiles(t, [], () => void (called = true))).toBeUndefined();
-    expect(fired).toBe(false);
-    expect(called).toBe(false);
+describe("fileAction", () => {
+  it("attaches what the host's upload returns; a failed upload is a notice, not a crash", async () => {
+    const notes: string[] = [];
+    const act = fileAction({
+      pick: async () => [{ name: "a.png" }, { name: "b.txt" }] as File[],
+      upload: async (f) => {
+        if (f.name === "b.txt") throw new Error("too big");
+        return {
+          name: f.name,
+          url: "https://files.example.com/a.png",
+          type: "image/png",
+          size: 10,
+        };
+      },
+    });
+    const ctx = await act.attach?.({ notice: (t: string) => notes.push(t) } as never);
+    expect(ctx).toEqual({
+      files: [
+        { name: "a.png", url: "https://files.example.com/a.png", type: "image/png", size: 10 },
+      ],
+    });
+    expect(notes).toEqual(["Could not attach b.txt"]);
+  });
+  it("nothing picked: nothing attached", async () => {
+    const act = fileAction({
+      pick: async () => [],
+      upload: async () => ({ name: "x", url: "/x" }),
+    });
+    expect(await act.attach?.({ notice() {} } as never)).toBeNull();
   });
 });
