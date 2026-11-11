@@ -45,6 +45,7 @@ import {
   chatText,
   trimHistory,
 } from "./protocol.ts";
+import { pageHidden, silenceFor } from "./speak-rules.ts";
 
 /** How long `evalRan` stays true after code ran on this page. */
 export const RAN_MS = 4_000;
@@ -515,4 +516,25 @@ export function createChat(opts: ChatOptions = {}): Chat {
     beat,
     set,
   };
+}
+
+/** A voice output (liagent/voice's `voice()`, or the host's own). */
+export type ChatSpeaker = { speak(text: string, id?: string): void };
+
+/**
+ * Read the agent's live replies through `v`, by the box's rules: never
+ * history, never a `quiet` line, never while the page is hidden
+ * (src/speak-rules.ts). Returns unhook.
+ */
+export function connectVoice(
+  chat: Pick<Chat, "on">,
+  v: ChatSpeaker,
+  opts: { hidden?: () => boolean } = {},
+): () => void {
+  const hidden = opts.hidden ?? pageHidden;
+  return chat.on("message", (m, { live }) => {
+    if (!live || m.from !== "agent") return;
+    if (silenceFor(m, { hidden: hidden() })) return;
+    v.speak(m.text, m.id);
+  });
 }
