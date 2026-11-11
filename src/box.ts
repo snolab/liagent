@@ -1327,7 +1327,8 @@ export class ChatBox extends Base {
     u.rate = this.speechRate;
     u.pitch = this.speechPitch;
     // A line may name its voice (`say --voice`); not installed: the usual pick.
-    const named = typeof line.voice === "string" ? s.getVoices().find((v) => v.name === line.voice) : undefined;
+    const named =
+      typeof line.voice === "string" ? s.getVoices().find((v) => v.name === line.voice) : undefined;
     const voice = named ?? voicePicker.pick(u.lang, this.voicePrefer);
     if (voice) u.voice = voice;
     s.speak(u);

@@ -4,7 +4,9 @@ import { cleanForSpeech, spokenText } from "../src/spoken.ts";
 
 describe("spokenText", () => {
   test("a line's own speak wins over its text", () => {
-    expect(spokenText({ text: "AI助手: 12/10 → /todo/", speak: " 欸哀助手：十二月十号 " })).toBe("欸哀助手：十二月十号");
+    expect(spokenText({ text: "AI助手: 12/10 → /todo/", speak: " 欸哀助手：十二月十号 " })).toBe(
+      "欸哀助手：十二月十号",
+    );
   });
   test("an empty or non-string speak falls back to the cleaned text", () => {
     for (const speak of [undefined, "", "  ", 3, null])
@@ -17,9 +19,9 @@ describe("spokenText", () => {
 
 describe("cleanForSpeech", () => {
   test("drops links and paths, keeps the words", () => {
-    expect(cleanForSpeech("下一笔付款 12/10，详情 https://example.com/a?b=1 或 /app/bills/today/")).toBe(
-      "下一笔付款 12/10，详情 或",
-    );
+    expect(
+      cleanForSpeech("下一笔付款 12/10，详情 https://example.com/a?b=1 或 /app/bills/today/"),
+    ).toBe("下一笔付款 12/10，详情 或");
     expect(cleanForSpeech("open ./notes/today.md and ~/x/y")).toBe("open and");
   });
   test("ellipses become a pause; arrows, markdown marks and emoji go", () => {

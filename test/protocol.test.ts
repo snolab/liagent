@@ -52,7 +52,10 @@ describe("parseControllerMessage", () => {
       value: { type: "say", text: "AI → /x", speak: "ei ai", voice: "Kyoko" },
     });
     for (const v of ["  ", 1, null, {}, ["x"]])
-      expect(say({ speak: v, voice: v })).toEqual({ ok: true, value: { type: "say", text: "AI → /x" } });
+      expect(say({ speak: v, voice: v })).toEqual({
+        ok: true,
+        value: { type: "say", text: "AI → /x" },
+      });
     const long = say({ speak: "x".repeat(MAX_SPEAK + 50) });
     expect(long.ok && long.value.type === "say" && long.value.speak?.length).toBe(MAX_SPEAK);
   });

@@ -24,7 +24,7 @@ export function spokenText(m: { text: string; speak?: unknown }): string {
 export function cleanForSpeech(text: string): string {
   return text
     .replace(/\bhttps?:\/\/\S+/gi, " ")
-    .replace(/(^|[\s(（])(?:~|\.{1,2})?\/[\w.~%@:/\-]+/g, "$1 ")
+    .replace(/(^|[\s(（])(?:~|\.{1,2})?\/[\w.~%@:/-]+/g, "$1 ")
     .replace(/(?:…+|\.{3,})/g, ", ")
     .replace(/[→←↑↓⇒⇐↔➜➡]️?/g, " ")
     .replace(/^#{1,6}\s+/gm, "")
