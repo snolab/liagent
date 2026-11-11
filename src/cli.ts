@@ -22,10 +22,12 @@ const USAGE = `liagent — the agent's side of the user ⇄ agent chat (src/hub.
       the saved grant and reconnects on network drops (backing off from 1 s
       to a minute) without ever asking the user again; see "Pairing".
 
-  liagent say    [hub] "text" | -   [--to <email|user id>] [--quiet]
+  liagent say    [hub] "text" | -   [--to <email|user id>] [--quiet] [--lang <tag>]
       Reply in the box (the user's thread, or a friend's), then exit.
       --quiet: shown, never read aloud (FYI, progress, notices: anything
       the user did not ask for). A hidden page never reads aloud.
+      --lang: the line's language, a BCP-47 tag (fr-FR, de): it is read
+      aloud in that language (else it is guessed from the script).
       --loud is deprecated: accepted and ignored (a plain say).
 
   liagent say    [hub] "text" --to /words/audio
@@ -523,6 +525,7 @@ async function main() {
   if (cmd === "say") {
     const to = flag("--to");
     const quiet = takeSwitch("--quiet");
+    const lang = flag("--lang");
     // Deprecated: it does nothing now; accepted so old commands still work.
     if (takeSwitch("--loud"))
       console.error("liagent: say --loud is deprecated and does nothing (a plain say)");
@@ -538,6 +541,7 @@ async function main() {
         ...(place.node ? { taskPath: place.node } : {}),
         ...(place.agent ? { agentId: place.agent } : {}),
         ...(quiet ? { quiet: true } : {}),
+        ...(lang ? { lang } : {}),
       },
       "said",
     );

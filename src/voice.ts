@@ -6,7 +6,7 @@
  *
  *   import { voice } from "liagent/voice";
  *   const v = voice({ tts: "/api/tts" });   // tts: only for the "cloud" output
- *   box.voice = v;                           // the box calls v.speak(text, id) / v.stop(why)
+ *   box.voice = v;                           // the box calls v.speak(text, id, { lang }?) / v.stop(why)
  *   mic.voice = v;                           // <liagent-mic>: ducking, barge-in, the echo guard
  *
  * - Replies go in a FIFO queue, one utterance per sentence (sentences longer
@@ -17,9 +17,10 @@
  *   voiceQuality), or "cloud": each sentence from the host's TTS endpoint,
  *   played through the page's own audio so the echo canceller hears it. A
  *   sentence the cloud cannot voice is read by speechSynthesis instead.
- * - The voice (src/voice-pick.ts): `lang` forces the language (else from the
- *   script), `prefer` names the voices to try first; the choice is made
- *   again after speechSynthesis `voiceschanged`.
+ * - The voice (src/voice-pick.ts): a message's own `lang` (the box passes it
+ *   as speak's third argument) comes first; else `lang` forces the language
+ *   (else from the script), `prefer` names the voices to try first; the
+ *   choice is made again after speechSynthesis `voiceschanged`.
  * - The speed (src/speech-rate.ts, `liagent:speech-rate`) applies from the
  *   next utterance, on both outputs.
  * - Mic on: every reply is read, whatever the read-aloud toggle says (the
@@ -44,7 +45,7 @@
  * events and one-shot timers, never polling.
  */
 import { ECHO_WINDOW_MS, type EchoScore, echoScore } from "./echo.ts";
-import { pickLang } from "./protocol.ts";
+import { langTag, pickLang } from "./protocol.ts";
 import { speechRate } from "./speech-rate.ts";
 import {
   type OutMode,
@@ -515,10 +516,14 @@ export function createVoice(d: {
       if (!on && !focusRule()) return clear();
       emit();
     },
-    /** A reply arrived live: queue its sentences (if it should be read). */
-    reply(text: string): boolean {
+    /**
+     * A reply arrived live: queue its sentences (if it should be read).
+     * `own` is the message's own language (a BCP-47 tag): it goes ahead of
+     * the forced `lang` and the guess from the script.
+     */
+    reply(text: string, own?: string): boolean {
       if (!canSpeak() || !api.shouldSpeak()) return false;
-      const lang = readingLang({ lang: d.lang?.() }, () => pickLang(text));
+      const lang = langTag(own) ?? readingLang({ lang: d.lang?.() }, () => pickLang(text));
       const add = sentences(text)
         .flatMap((s) => chunk(s))
         .map((t) => ({ text: t, lang, from: 0, at: 0 }));
@@ -532,16 +537,17 @@ export function createVoice(d: {
       return true;
     },
     /**
-     * The box's hook: read a live reply (once per message id). The same as
-     * reply(), without its answer.
+     * The box's hook: read a live reply (once per message id), in the
+     * message's own `lang` if the box passes one. The same as reply(),
+     * without its answer.
      */
-    speak(text: string, id?: string): void {
+    speak(text: string, id?: string, opts?: { lang?: string }): void {
       if (id) {
         if (spokenIds.includes(id)) return;
         spokenIds.push(id);
         if (spokenIds.length > SPOKEN_IDS) spokenIds.shift();
       }
-      api.reply(text);
+      api.reply(text, opts?.lang);
     },
     /**
      * The box's hook: `stop("typing")` (or "tap", "speech") pauses the
@@ -640,7 +646,7 @@ export type Voice = ReturnType<typeof createVoice>;
 
 /** What the box needs of a voice: read a live reply, and stop (or pause) reading. */
 export interface VoiceHook {
-  speak(text: string, id?: string): void;
+  speak(text: string, id?: string, opts?: { lang?: string }): void;
   stop(why?: string): void;
 }
 

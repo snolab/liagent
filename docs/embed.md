@@ -681,8 +681,9 @@ What the mic uses on the box (`box` is its parent element):
 So a final transcript is usually `box.setDraft(joined(box.draft, text), { source: "stt" })`,
 then `box.submit()` when it ends a sentence.
 
-For voice output, set `box.voice = { speak(text, id?), stop(why?) }`. The box
-then calls `voice.speak(reply.text, reply.id)` for each reply that arrives
+For voice output, set `box.voice = { speak(text, id?, opts?), stop(why?) }`. The box
+then calls `voice.speak(reply.text, reply.id)` (with a third argument
+`{ lang }` when the reply has its own `lang`, below) for each reply that arrives
 live (when read-aloud is on, or a mic is on) instead of using
 `speechSynthesis`, and `voice.stop("typing")` when the user types (`"off"`
 when read-aloud is turned off). `box.speechRate` is the menu's speed for it to
@@ -710,6 +711,21 @@ included). It copies it onto the `ChatMessage`, so pages get it live and in
 history. History is never read aloud either way. With your own transport,
 pass the message to `box.push(m)` and the box reads its `quiet`;
 `box.speak(text, id, m)` does the same.
+
+### A line's language
+
+The box reads a line in its own `lang`, a BCP-47 tag such as `"fr-FR"` or
+`"de"`, when it has one (`liagent say --lang fr-FR …`, or
+`{type:"say", text, lang?}` on the wire). Otherwise the language is
+`voicePrefer.lang` (or `voice({ lang })`), else a guess from the script,
+which tells only Japanese, Korean and Chinese from English, so a French or
+German reply needs `lang` to get a voice of its own. The hub keeps `lang`
+only when it looks like a language tag (`langTag`: letters, then letter or
+digit subtags, at most 35 characters) and copies it onto the `ChatMessage`.
+With your own transport, set `lang` on the message you pass to
+`box.push(m)`. With `box.voice` set, the box passes it on as
+`voice.speak(text, id, { lang })`; `liagent/voice` reads every sentence of
+that reply in it.
 
 The rules are pure functions in `liagent/ui` (`silenceFor`, `isQuiet`) for
 hosts that read aloud some other way. An older version kept a per-device
@@ -988,8 +1004,10 @@ How it reads:
   (so `3.14` stays whole), after `。．！？` with closing brackets, and at
   newlines. A sentence over 200 characters is cut at a clause mark, else at
   a space. A new reply waits behind the one being read and never cuts it off.
-- **The voice.** The language comes from the script (kana → ja-JP, Hangul
-  → ko-KR, other Han → zh-CN, else en-US), unless `lang` is set. Among the
+- **The voice.** The language is the reply's own `lang` when the box passes
+  one ([A line's language](#a-lines-language)); else it comes from the
+  script (kana → ja-JP, Hangul → ko-KR, other Han → zh-CN, else en-US),
+  unless `lang` is set. Among the
   installed voices it prefers Premium, then Enhanced or Siri, then the
   regular named voice, and never iOS's Eloquence or novelty voices
   (`voiceQuality`, `pickNaturalVoice`). `prefer` names voices to try

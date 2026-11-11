@@ -413,6 +413,23 @@ describe("ChatHub chat", () => {
     expect(h.find((m) => m.text === "plain")).not.toHaveProperty("quiet");
   });
 
+  it("say's lang reaches the pages and the history when it is a language tag", async () => {
+    const { page, controller, msg, pairOf } = setup();
+    const p = page();
+    const c = controller("main lane");
+    await msg(p, { type: "allow", pair: pairOf(p) });
+    await msg(c, { type: "say", text: "Bonjour.", lang: "fr-FR" });
+    await msg(c, { type: "say", text: "plain", lang: "not a tag" });
+    const [fr, plain] = chats(p).slice(-2) as Record<string, unknown>[];
+    expect(fr).toMatchObject({ text: "Bonjour.", lang: "fr-FR" });
+    expect(plain).not.toHaveProperty("lang");
+    const again = page();
+    await new Promise((r) => setTimeout(r, 0));
+    const h = (again.last("history") as { messages: Record<string, unknown>[] }).messages;
+    expect(h.find((m) => m.text === "Bonjour.")).toMatchObject({ lang: "fr-FR" });
+    expect(h.find((m) => m.text === "plain")).not.toHaveProperty("lang");
+  });
+
   it("an unapproved controller cannot say", async () => {
     const { page, controller, msg } = setup();
     const p = page();

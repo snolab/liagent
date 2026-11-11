@@ -215,6 +215,10 @@ while the agent speaks and while the page plays its own sounds (wrap them in
 change reopens an open mic at once. See
 [docs/embed.md](docs/embed.md#9-hands-free-voice).
 
+A line's own `lang` (a BCP-47 tag: `liagent say --lang fr-FR …`, or `lang`
+on a message you push) picks its reading language; without it the language
+is guessed from the script (ja/ko/zh, else English).
+
 Not every line should be spoken. `liagent say --quiet` lines are shown but
 never read, and a hidden page never speaks (hiding it stops the reading).
 See [docs/embed.md](docs/embed.md#quiet-lines).
