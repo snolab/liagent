@@ -166,11 +166,19 @@ export async function sileroVad(ev: VadEvents, stream: MediaStream, src: VadSour
   return {
     start: () => v.start(),
     pause: () => v.pause(),
+    // A MicVAD that never finished initialising throws on pause/destroy
+    // ("MicVAD has null stream, audio context, or processor adapter"): nothing to clean.
     flush: async () => {
-      await v.pause();
-      await v.start();
+      try {
+        await v.pause();
+        await v.start();
+      } catch {}
     },
-    destroy: () => v.destroy(),
+    destroy: async () => {
+      try {
+        await v.destroy();
+      } catch {}
+    },
   };
 }
 
