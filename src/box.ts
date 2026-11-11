@@ -2866,7 +2866,15 @@ export class ChatBox extends Base {
         }),
       );
       // The avatar's own tooltip hides the line's: it leads with the sending time too.
-      const av = avatarEl(who.srcs, who.node, who.name, initialOf(who.initialFrom), who.seed, 0, when(m.at));
+      const av = avatarEl(
+        who.srcs,
+        who.node,
+        who.name,
+        initialOf(who.initialFrom),
+        who.seed,
+        0,
+        when(m.at),
+      );
       li.append(av, text);
       log.append(li);
     }
