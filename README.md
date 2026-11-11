@@ -15,6 +15,7 @@ bun add liagent
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `liagent`                                           | the box, `connectHub`, and the protocol (browser)                                                       |
 | `liagent/box`, `liagent/client`, `liagent/protocol` | each part on its own                                                                                    |
+| `liagent/core`                                      | headless: the chat session with no UI (`createChat`, `hubTransport`), for hosts that draw their own     |
 | `liagent/ui`                                        | the box's pure parts (tree nav, detents, floating lines, echo guard…), for hosts that draw their own UI |
 | `liagent/mic`                                       | `<liagent-mic>`: voice input into the box (VAD, your STT endpoint), and its pure parts                  |
 | `liagent/voice`                                     | hands-free voice out: a sentence queue, barge-in, ducking, the echo guard, your TTS endpoint (optional) |
@@ -138,6 +139,28 @@ tests. See [docs/embed.md](docs/embed.md#files-paste-drop-pick-and-the-file-list
 wide, so at any size it stays concentric with the corner it sits in. The
 mic's look: `--liagent-mic-fg`, `--liagent-mic-bg`, `--liagent-mic-icon`,
 `--liagent-mic-rec`, `--liagent-mic-talk`.
+
+## Headless: your own UI
+
+`liagent/core` is the chat without the box: the hub session, the message
+list, pairing, sessions, busy, and the outbox, as a store any framework can
+draw. The box is drawn from the same store.
+
+```ts
+import { createChat, hubTransport } from "liagent/core";
+
+const chat = createChat({ transport: hubTransport({ url: "/api/chat" }) });
+chat.subscribe(() => render(chat.getState())); // a frozen snapshot, replaced on change
+chat.on("message", (m, { live }) => live && m.from === "agent" && voice.speak(m.text, m.id));
+chat.start(); // stop() and start() again freely; close() for good
+
+chat.send("Make the toggle bigger"); // false: not sent, so keep the draft
+chat.allow(pair, { pages: "all" }); // only from a user's tap: refused otherwise
+```
+
+Render message text as text only, never as HTML. `src/core.ts`'s header
+lists the rules the core keeps. [docs/headless-plan.md](docs/headless-plan.md)
+is the plan, and React hooks and a from-scratch example follow.
 
 ## Voice input
 

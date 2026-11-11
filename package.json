@@ -72,6 +72,12 @@
       "import": "./dist/tree.js",
       "default": "./dist/tree.js"
     },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "browser": "./dist/core.js",
+      "import": "./dist/core.js",
+      "default": "./dist/core.js"
+    },
     "./client": {
       "types": "./dist/client.d.ts",
       "browser": "./dist/client.js",
