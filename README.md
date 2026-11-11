@@ -53,7 +53,7 @@ rest of the gesture on to the log.
 
 Properties: `messages`, `live`, `listeners`, `sessions`, `pending`, `evalRan`,
 `busy`, `guest`, `notice`, `warning`, `defaultOpen`, `placeholder`,
-`treeSource`, `strings`, `voice`, `voicePrefer`, `micActive`, `actions`,
+`treeSource`, `strings`, `voice`, `voicePrefer`, `speechPitch`, `micActive`, `actions`,
 `micPlacement`, `treePlacement`, `attached`, and the avatars: `agentAvatar`
 (set it to your app's logo), `userAvatar`, `userName`, `userId`.
 Callbacks: `onSend(text, to?, { source?, context? }) → boolean`, `onAnswer(type, pair, scope?)`, `onEnd(pair)`,

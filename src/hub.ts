@@ -1298,7 +1298,7 @@ export class ChatHub {
     if (m.value.type === "say") {
       if (c.forUser)
         return send(ws, { type: "error", error: "a pairing for a friend cannot chat" });
-      const { text, to, node, agentId, quiet } = m.value;
+      const { text, to, node, agentId, quiet, speak, voice } = m.value;
       // The sender's node: what the line says, within the node its socket listens at.
       const home = c.node ?? ROOT_NODE;
       const from = m.value.taskPath ?? home;
@@ -1329,6 +1329,9 @@ export class ChatHub {
           ...(node ? { to: node } : {}),
           // Never read aloud (src/speak-rules.ts): only ever `true`, as parsed.
           ...(quiet === true ? { quiet: true as const } : {}),
+          // Read aloud instead of `text`, and by which voice (src/spoken.ts): as parsed.
+          ...(speak ? { speak } : {}),
+          ...(voice ? { voice } : {}),
         };
         log({
           msg: "chat.say",

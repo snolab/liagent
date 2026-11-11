@@ -22,10 +22,16 @@ const USAGE = `liagent — the agent's side of the user ⇄ agent chat (src/hub.
       the saved grant and reconnects on network drops (backing off from 1 s
       to a minute) without ever asking the user again; see "Pairing".
 
-  liagent say    [hub] "text" | -   [--to <email|user id>] [--quiet]
+  liagent say    [hub] "text" | -   [--to <email|user id>] [--quiet] [--speak "…"] [--voice <name>]
       Reply in the box (the user's thread, or a friend's), then exit.
       --quiet: shown, never read aloud (FYI, progress, notices: anything
       the user did not ask for). A hidden page never reads aloud.
+      --speak: what read-aloud says instead of the text (a clean spoken
+      version: the screen keeps amounts, links, paths and symbols exact).
+      Without it the text is read with links, paths, "…", arrows and emoji
+      left out.
+      --voice: read this line with the installed voice of that name (if the
+      user's device has it), e.g. to let them try voices.
       --loud is deprecated: accepted and ignored (a plain say).
 
   liagent say    [hub] "text" --to /words/audio
@@ -523,6 +529,8 @@ async function main() {
   if (cmd === "say") {
     const to = flag("--to");
     const quiet = takeSwitch("--quiet");
+    const speak = flag("--speak");
+    const voice = flag("--voice");
     // Deprecated: it does nothing now; accepted so old commands still work.
     if (takeSwitch("--loud"))
       console.error("liagent: say --loud is deprecated and does nothing (a plain say)");
@@ -538,6 +546,8 @@ async function main() {
         ...(place.node ? { taskPath: place.node } : {}),
         ...(place.agent ? { agentId: place.agent } : {}),
         ...(quiet ? { quiet: true } : {}),
+        ...(speak ? { speak } : {}),
+        ...(voice ? { voice } : {}),
       },
       "said",
     );

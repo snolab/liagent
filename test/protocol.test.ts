@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   MAX_CHAT,
+  MAX_SPEAK,
   type ChatMessage,
   applyEdit,
   dictatedDraft,
@@ -42,6 +43,18 @@ describe("parseControllerMessage", () => {
     });
     for (const v of ["true", 1, false, null, {}, [true]])
       expect(say({ quiet: v, loud: v })).toEqual({ ok: true, value: { type: "say", text: "hi" } });
+  });
+  test("say keeps a non-empty speak and voice (trimmed, capped); other types are dropped", () => {
+    const say = (extra: Record<string, unknown>) =>
+      parseControllerMessage(JSON.stringify({ type: "say", text: "AI → /x", ...extra }));
+    expect(say({ speak: "  ei ai  ", voice: " Kyoko " })).toEqual({
+      ok: true,
+      value: { type: "say", text: "AI → /x", speak: "ei ai", voice: "Kyoko" },
+    });
+    for (const v of ["  ", 1, null, {}, ["x"]])
+      expect(say({ speak: v, voice: v })).toEqual({ ok: true, value: { type: "say", text: "AI → /x" } });
+    const long = say({ speak: "x".repeat(MAX_SPEAK + 50) });
+    expect(long.ok && long.value.type === "say" && long.value.speak?.length).toBe(MAX_SPEAK);
   });
   test("say needs text within MAX_CHAT", () => {
     expect(parseControllerMessage('{"type":"say","text":"  "}').ok).toBe(false);

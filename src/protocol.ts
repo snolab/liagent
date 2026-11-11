@@ -20,7 +20,7 @@
 //                     {type:"history", messages} | {type:"chat", message}
 //                     {type:"busy", label, at} | {type:"eval", id, code, to}
 //                     {type:"edited", id, thread, text, raw, edited}   (a voice line polished)
-//   agent → hub       {type:"say", text, to?, taskPath?, agentId?, quiet?} | {type:"busy", to?}
+//   agent → hub       {type:"say", text, to?, taskPath?, agentId?, quiet?, speak?, voice?} | {type:"busy", to?}
 //                     {type:"eval", code, target?} | {type:"grant"|"ungrant", from, to, ms?}
 //                     {type:"edit", id, text}   (polish the owner's latest stt line)
 //   hub → agent       {type:"pending", code} | {type:"approved", until, scope, pages, token?}
@@ -56,6 +56,10 @@ export const EVAL_GRANT_MS = 8 * 60 * 60_000;
 export const CHAT_MS = 30 * 24 * 60 * 60_000;
 /** Largest chat message (owner's or agent's), in characters. */
 export const MAX_CHAT = 4000;
+/** Largest read-aloud text a line may carry (`speak`), in characters. */
+export const MAX_SPEAK = 4000;
+/** Longest voice name a line may ask for (`voice`). */
+export const MAX_VOICE_NAME = 120;
 /** Chat messages the hub keeps (and sends a page on connect). */
 export const CHAT_HISTORY = 200;
 /** A page shows the spinner while the agent's last busy beat is younger than this. */
@@ -121,6 +125,14 @@ export type ChatMessage = {
   raw?: string;
   /** An agent line never read aloud (`say --quiet`: FYI, progress). Only ever `true`. */
   quiet?: true;
+  /**
+   * What read-aloud says instead of `text` (`say --speak`): a clean spoken
+   * version, so the screen keeps amounts, links and paths exact while the
+   * voice reads a natural sentence. Absent: `text`, cleaned (src/spoken.ts).
+   */
+  speak?: string;
+  /** The installed voice to read this line with, by name (`say --voice`); absent or not installed: the usual pick. */
+  voice?: string;
   /** Set when the agent polished the line: when, by which agent, and how many times. */
   edited?: EditMark;
   /** What the user attached to the line (the box's + menu): checked by cleanContext. */
@@ -221,6 +233,10 @@ export type ControllerMessage =
       agentId?: string;
       /** Never read aloud. Kept only as boolean true. */
       quiet?: true;
+      /** Read aloud instead of `text` (1–MAX_SPEAK chars). */
+      speak?: string;
+      /** The voice to read it with, by name. */
+      voice?: string;
     }
   | { type: "busy"; to?: string; on?: boolean }
   /** Polish the owner's latest line, when it came from the box's mic (`source: "stt"`). */
@@ -302,6 +318,10 @@ export function parseControllerMessage(
     if (agentId) value.agentId = agentId;
     // Only boolean true counts. An old `loud` is dropped: it means nothing now.
     if (m.quiet === true) value.quiet = true;
+    const speak = typeof m.speak === "string" ? m.speak.trim().slice(0, MAX_SPEAK) : "";
+    if (speak) value.speak = speak;
+    const voice = typeof m.voice === "string" ? m.voice.trim().slice(0, MAX_VOICE_NAME) : "";
+    if (voice) value.voice = voice;
     return { ok: true, value };
   }
   if (m?.type === "edit") {

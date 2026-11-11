@@ -381,6 +381,8 @@ kept silent (`why`: `"hidden"` or `"quiet"`).
   for a voice input (below).
 - `speechRate`: the read-aloud speed picked in the menu (1, 1.25, 1.5 or 2;
   per device, default 1.5).
+- `speechPitch`: the read-aloud pitch (0–2, default 1), set by the host. See
+  [Spoken text](#spoken-text-speak-voice-and-speechpitch).
 - `setTree(open)`: shows or hides the state tree.
 - `attach(context | null, by?)`: attaches to the next line (merged with what
   is attached: a newer selection replaces the older, files add up); `null`
@@ -1009,6 +1011,28 @@ How it reads:
   Dice over character n-grams). With `localStorage["liagent:voice-aec"] = "0"`,
   capture is held while the agent speaks and for 400 ms after.
 
+### Spoken text: `speak`, `voice` and `speechPitch`
+
+The screen always shows a line's `text`. What is read aloud can differ:
+
+- **`speak`** (`liagent say --speak "…"`): the line's own read-aloud text.
+  The agent writes a clean spoken version, so amounts, links and paths stay
+  exact on screen while the voice reads a natural sentence (dates as words,
+  no URLs, an abbreviation spelled the way listeners say it).
+- **Without `speak`**, the text is read with what a voice reads badly left
+  out: URLs, paths (`/a/b`, `./x`, `~/y`), ellipses (read as a pause),
+  arrows, markdown marks and emoji (`cleanForSpeech`, src/spoken.ts).
+- **`voice`** (`liagent say --voice "Kyoko"`): read this line with the
+  installed voice of that name, e.g. to let the user try voices out. If the
+  device does not have it, the usual pick (`voicePrefer`) is used.
+- **`box.speechPitch`** (0–2, default 1): the read-aloud pitch when the box
+  reads with `speechSynthesis` itself.
+
+On the wire a say is `{type:"say", text, speak?, voice?}`; the hub keeps
+`speak` (trimmed, at most `MAX_SPEAK` characters) and `voice` only as
+non-empty strings and copies them onto the `ChatMessage`. A `voice` output
+you set gets the spoken text too (`voice.speak(spokenText(line), id)`).
+
 ### The voice: `lang` and `prefer`
 
 ```ts
@@ -1018,10 +1042,12 @@ voice({ lang: "ja-JP", prefer: ["Google 日本語", "Microsoft Nanami", "Kyoko"]
 - `lang` forces the reading language for every reply (and the `lang` sent
   to a TTS endpoint). Unset, it comes from each reply's script.
 - `prefer` lists voice names, best first. They are tried among the
-  installed voices of the reply's language (any region: `ja-JP` takes any
-  `ja-*` voice). An exact `name` match is tried first, for each entry in
-  order, then a case-insensitive substring. If none is installed, the
-  automatic pick is used. A name in another language is skipped.
+  installed voices of the reply's exact locale first (`zh-TW` takes a
+  `zh-TW` voice before a `zh-CN` one listed earlier), then of its language
+  (any region: `ja-JP` takes any `ja-*` voice). In each, an exact `name`
+  match is tried first, for each entry in order, then a case-insensitive
+  substring. If none is installed, the automatic pick is used. A name in
+  another language is skipped.
 - Chrome lists its voices late (`getVoices()` is empty at first). The
   choice is kept per language until `speechSynthesis` fires
   `voiceschanged`, then made again, so a preferred voice that loads after

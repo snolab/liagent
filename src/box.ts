@@ -228,6 +228,7 @@ import { type VoicePreference, createVoicePicker, readingLang, watchVoices } fro
 import { createSwipeHandoff, splitScroll, wheelPixels } from "./scroll-handoff.ts";
 import { type UiStrings, treeDefaults, uiStrings } from "./ui-strings.ts";
 import { RETIRED_SETTINGS, type SpeakMeta, pageHidden, silenceFor } from "./speak-rules.ts";
+import { spokenText } from "./spoken.ts";
 import type { Assignee } from "./state-tree.ts";
 
 export {
@@ -818,6 +819,17 @@ export class ChatBox extends Base {
    * give the same to `voice({ lang, prefer })` instead.
    */
   voicePrefer?: VoicePreference | null;
+  private _pitch = 1;
+  /**
+   * Read-aloud pitch when the box reads with speechSynthesis itself (0–2,
+   * default 1; the host's choice, e.g. a little higher for a lighter voice).
+   */
+  get speechPitch(): number {
+    return this._pitch;
+  }
+  set speechPitch(v: number) {
+    this._pitch = Number.isFinite(v) ? Math.min(2, Math.max(0, v)) : 1;
+  }
 
   private _messages: ChatMessage[] = [];
   private _live = false;
@@ -953,7 +965,8 @@ export class ChatBox extends Base {
     // A reply ends the spinner for the work it answers.
     this.lastReplyAt = Date.now();
     this.busy = false;
-    this.speak(m.text, m.id, m);
+    // The line's own read-aloud text if it has one, else its text cleaned for a voice (src/spoken.ts).
+    this.speak(spokenText(m), m.id, m);
   }
   /**
    * The agent polished a voice line ({type:"edited"}): it changes in place,
@@ -1299,7 +1312,7 @@ export class ChatBox extends Base {
    * (the message's `quiet`) is checked first, with the page's visibility
    * (src/speak-rules.ts), for both outputs.
    */
-  speak(text: string, id?: string, line: SpeakMeta = {}) {
+  speak(text: string, id?: string, line: SpeakMeta & { voice?: unknown } = {}) {
     const why = silenceFor(line, { hidden: pageHidden() });
     if (why) {
       this.dispatchEvent(new CustomEvent("liagent-silent", { detail: { id, why } }));
@@ -1312,7 +1325,10 @@ export class ChatBox extends Base {
     const u = new SpeechSynthesisUtterance(text);
     u.lang = readingLang(this.voicePrefer, () => pickLang(text));
     u.rate = this.speechRate;
-    const voice = voicePicker.pick(u.lang, this.voicePrefer);
+    u.pitch = this.speechPitch;
+    // A line may name its voice (`say --voice`); not installed: the usual pick.
+    const named = typeof line.voice === "string" ? s.getVoices().find((v) => v.name === line.voice) : undefined;
+    const voice = named ?? voicePicker.pick(u.lang, this.voicePrefer);
     if (voice) u.voice = voice;
     s.speak(u);
   }

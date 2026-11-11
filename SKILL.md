@@ -141,6 +141,45 @@ Default to `--quiet` whenever the line is not a reply. A page in the
 background never speaks. `--loud` is deprecated: it is accepted and does
 nothing.
 
+### Spoken text: `--speak`
+
+**Replying in Chinese, Japanese or Korean? Add `--speak` to every reply that
+is read aloud.** CJK voices read Latin letters, digits and symbols poorly
+(an abbreviation spelled in an English accent or skipped, "…" read as dots),
+so the spoken version below is not optional there.
+
+A line that is read aloud can carry its own spoken version. The screen shows
+the text; the voice reads `--speak`:
+
+```bash
+liagent say --speak "下一笔付款是十二月十号，一万两千日元。" \
+  "下一笔付款 12/10：¥12,000 → https://example.com/bills"
+```
+
+Give a reply a `--speak` whenever its text has anything a voice reads badly:
+amounts and dates, URLs, paths, ids, arrows, "…", emoji, abbreviations.
+Without it the box drops URLs, paths, "…", arrows, markdown marks and emoji
+before reading, but it cannot say numbers or abbreviations the way a person
+would. Write the spoken version as speech:
+
+- Plain sentences, shorter than the text; no URLs, paths, ids or symbols.
+- Dates and amounts as words in the reply's language ("十二月十号",
+  "December tenth").
+- Abbreviations the way listeners say them. Use the established reading
+  first; spell letter by letter only when there is none. In Chinese, write
+  the sounds in hanzi: Latin syllables may be skipped by a Chinese voice.
+  - Common readings: XP 叉批, iPhone 哀凤, iPad 哀派, Wi-Fi 歪发一, AI 欸哀.
+  - Letters: A 欸 B 比 C 西 D 迪 E 伊 F 艾芙 G 吉 H 艾曲 I 哀 J 杰 K 开
+    L 艾樂 M 艾姆 N 恩 O 欧 P 披 Q 丘 R 阿尔 S 艾斯 T 踢 U 优 V 维
+    W 达布溜 X 艾克斯 Y 歪 Z 贼 (AWS 欸达布溜艾斯, PDF 披迪艾芙).
+  - Japanese: katakana (AI エーアイ, PDF ピーディーエフ, iPhone アイフォーン);
+    Korean: hangul (AI 에이아이, PDF 피디에프).
+- Keep names the user sees on screen in the text (the product's name, a
+  label); only their reading changes.
+
+`--voice "<name>"` reads one line with a named installed voice (e.g. when the
+user wants to compare voices); the device's preference is used otherwise.
+
 ## Agent edits of voice messages
 
 STT gets words wrong, and it has no context on the conversation; you do. A

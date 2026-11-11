@@ -7,6 +7,7 @@
  *
  * - `lang` forces the reading language (else it comes from the script, pickLang).
  * - `prefer` lists voice names, in order, tried among the voices of that
+ *   exact locale first ("zh-TW" before any other zh-*), then of that
  *   language (same base language: "ja-JP" takes any "ja-*"): an exact
  *   `name` first, for each entry in order, then a case-insensitive
  *   substring. None installed: the automatic pick.
@@ -37,15 +38,19 @@ export function preferredVoice<V extends VoiceLike>(
 ): V | undefined {
   const names = (prefer ?? []).filter((n) => typeof n === "string" && n.trim());
   if (!names.length) return undefined;
-  const pool = voices.filter((v) => base(v.lang) === base(lang));
-  for (const n of names) {
-    const hit = pool.find((v) => v.name === n);
-    if (hit) return hit;
-  }
-  for (const n of names) {
-    const want = n.trim().toLowerCase();
-    const hit = pool.find((v) => (v.name ?? "").toLowerCase().includes(want));
-    if (hit) return hit;
+  // The reply's exact locale first ("zh-TW" → Meijia, not a zh-CN voice listed earlier), then its base language.
+  const exact = voices.filter((v) => norm(v.lang) === norm(lang));
+  const sameBase = voices.filter((v) => base(v.lang) === base(lang));
+  for (const pool of [exact, sameBase]) {
+    for (const n of names) {
+      const hit = pool.find((v) => v.name === n);
+      if (hit) return hit;
+    }
+    for (const n of names) {
+      const want = n.trim().toLowerCase();
+      const hit = pool.find((v) => (v.name ?? "").toLowerCase().includes(want));
+      if (hit) return hit;
+    }
   }
   return undefined;
 }

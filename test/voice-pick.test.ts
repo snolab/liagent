@@ -26,6 +26,16 @@ const VOICES = [
 ];
 
 describe("preferredVoice", () => {
+  it("tries the exact locale before the rest of the language", () => {
+    const zh = [v("Tingting", "zh-CN"), v("Meijia", "zh-TW"), v("Google 粤語（香港）", "zh-HK")];
+    const prefer = ["Tingting", "Meijia", "Google"];
+    expect(preferredVoice(zh, "zh-CN", prefer)?.name).toBe("Tingting");
+    expect(preferredVoice(zh, "zh-TW", prefer)?.name).toBe("Meijia");
+    expect(preferredVoice(zh, "zh-HK", prefer)?.name).toBe("Google 粤語（香港）");
+    // nothing named in the exact locale: the language's voices, in the order given
+    expect(preferredVoice(zh, "zh-SG", prefer)?.name).toBe("Tingting");
+    expect(preferredVoice(zh, "zh-CN", ["Meijia"])?.name).toBe("Meijia");
+  });
   it("takes an exact name first, in the order given", () => {
     expect(preferredVoice(VOICES, "ja-JP", ["Google 日本語", "Kyoko"])?.name).toBe("Google 日本語");
     expect(preferredVoice(VOICES, "ja-JP", ["Missing", "Kyoko", "Google 日本語"])?.name).toBe(
