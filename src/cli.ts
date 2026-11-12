@@ -30,6 +30,11 @@ const USAGE = `liagent — the agent's side of the user ⇄ agent chat (src/hub.
       aloud in that language (else it is guessed from the script).
       --loud is deprecated: accepted and ignored (a plain say).
 
+  liagent reply  [hub] [--polish "…"] [--id <id>] "text" | -   [--to <email|user id>] [--quiet] [--lang <tag>]
+      Reply to the user, optionally polishing the user's STT line in the same
+      turn before posting the reply. When --polish is set, edits the target
+      line (defaulting to the user's latest STT line) and then posts the reply.
+
   liagent say    [hub] "text" --to /words/audio
       Address a state-tree node instead (a --to starting with "/"): its
       agent gets it, its ancestors observe it. Allowed into your own
@@ -534,7 +539,9 @@ async function main() {
     ws.close();
     return;
   }
-  if (cmd === "say") {
+  if (cmd === "say" || cmd === "reply") {
+    const polish = flag("--polish");
+    const targetId = flag("--id");
     const to = flag("--to");
     const quiet = takeSwitch("--quiet");
     const lang = flag("--lang");
@@ -544,6 +551,23 @@ async function main() {
     const text = await readText();
     if (!text) usage(2);
     const ws = await connectOrExit(hub);
+
+    if (polish) {
+      let editTarget = targetId;
+      if (!editTarget) {
+        const list = (await histories.get(ws)) ?? [];
+        editTarget = list.filter((x) => x.from === "owner" && (x.thread ?? "owner") === "owner").at(-1)
+          ?.id as string | undefined;
+      }
+      if (editTarget) {
+        try {
+          await request(ws, { type: "edit", id: editTarget, text: polish }, "edited");
+        } catch (e) {
+          console.error(`liagent: polish warning: ${(e as Error).message}`);
+        }
+      }
+    }
+
     const r = await request(
       ws,
       {

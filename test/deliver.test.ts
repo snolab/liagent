@@ -16,7 +16,7 @@ const noSpill = () => {
 
 test("a short message: header with the reply command, then the text", () => {
   expect(deliveryText(hub, msg("fix it"), noSpill)).toBe(
-    `[liagent m1] the user wrote in the chat box (/words) — reply: liagent say ${hub} "..."\nfix it`,
+    `[liagent m1] the user wrote in the chat box (/words) — reply: liagent reply ${hub} [--polish "..."] "..."\nfix it`,
   );
 });
 
@@ -27,7 +27,7 @@ test("a friend's message replies to their thread", () => {
     noSpill,
   );
   expect(t).toContain("friend a@x.com wrote");
-  expect(t).toContain(`liagent say ${hub} --to a@x.com "..."`);
+  expect(t).toContain(`liagent reply ${hub} --to a@x.com [--polish "..."] "..."`);
 });
 
 test("a long one is spilled to a file and previewed within the send cap", () => {

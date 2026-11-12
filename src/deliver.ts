@@ -18,7 +18,7 @@ export function deliveryText(
   const who = m.from === "friend" ? `friend ${m.email || m.thread}` : "the user";
   const replyTo = m.from === "friend" ? ` --to ${m.email || m.thread}` : "";
   const page = m.label.split(" ")[0] || "?";
-  const header = `[liagent ${m.id}] ${who} wrote in the chat box (${page}) — reply: liagent say ${hub}${replyTo} "..."\n`;
+  const header = `[liagent ${m.id}] ${who} wrote in the chat box (${page}) — reply: liagent reply ${hub}${replyTo} [--polish "..."] "..."\n`;
   const body = m.text + contextText(m.context) + attachmentsText(m.attachments);
   if (header.length + body.length <= SEND_MAX) return header + body;
   const path = spill(m.id, body);
