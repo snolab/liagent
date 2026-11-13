@@ -131,7 +131,10 @@
 //     (true if it went out).
 //   - box.micActive = true (or the mic-active attribute) counts as focus: the
 //     log opens and the box goes opaque; while it is on, and while a partial
-//     shows, the debounce never sends by itself.
+//     shows, nothing sends by itself (neither the debounce nor a pasted or
+//     dictated sentence).
+//   - box.hold = true (or the hold attribute) keeps the draft the same way
+//     without the mic look; Enter and box.submit() still send.
 //   - box.voice = { speak(text, id?, { lang? }?), stop(why?) } reads replies
 //     aloud instead of speechSynthesis (the third argument only for a line
 //     with its own `lang`); typing calls voice.stop("typing"). box.speechRate is
@@ -191,7 +194,14 @@ import {
 } from "./files.ts";
 import { repinEnd, stillAtEnd } from "./log-pin.ts";
 import { aecOn, applyAec } from "./aec.ts";
-import { DEBOUNCE_MS, afterChange, enterSends, lineBreakSends, partialTail } from "./input.ts";
+import {
+  DEBOUNCE_MS,
+  afterChange,
+  autoSend,
+  enterSends,
+  lineBreakSends,
+  partialTail,
+} from "./input.ts";
 import { TREE_STRINGS_EN, type TreeSource, type TreeStrings, watchTree } from "./tree.ts";
 import { type TreeNode, frontier } from "./state-tree.ts";
 import { type AvatarSrc, type Sender, avatarColors, initialOf, lineAvatar } from "./avatar.ts";
@@ -756,7 +766,7 @@ type FloatLife = ReturnType<typeof createFloatLife>;
 /** The chat box element. Plain properties in, callbacks out; see the file header. */
 export class ChatBox extends Base {
   static get observedAttributes() {
-    return ["mic-active", "mic-placement", "tree-placement", "all-pages"];
+    return ["mic-active", "hold", "mic-placement", "tree-placement", "all-pages"];
   }
   /**
    * Called with each draft that goes out, and the state-tree node it is
@@ -871,6 +881,7 @@ export class ChatBox extends Base {
   private pure: string | null = null;
   private _partial = "";
   private _micActive = false;
+  private _hold = false;
   private _allPages = false;
   /** The input has focus: the log opens. */
   private typing = false;
@@ -1256,6 +1267,17 @@ export class ChatBox extends Base {
     else this.applyMic(!!v);
   }
   /**
+   * Hold the person's draft: nothing goes out by itself (no debounce, no
+   * sentence-jump send), with no mic look. Enter and submit() still send. Attribute: hold.
+   */
+  get hold() {
+    return this._hold;
+  }
+  set hold(v: boolean) {
+    if (typeof this.toggleAttribute === "function") this.toggleAttribute("hold", !!v);
+    else this.applyHold(!!v);
+  }
+  /**
    * The host grants code on every page of this user (its hub widens Allow to
    * "all"): the request says so, Allow sends pages "all", and no page ticks
    * are shown. Attribute: all-pages.
@@ -1269,6 +1291,7 @@ export class ChatBox extends Base {
   }
   attributeChangedCallback(name: string) {
     if (name === "mic-active") this.applyMic(this.hasAttribute("mic-active"));
+    else if (name === "hold") this.applyHold(this.hasAttribute("hold"));
     else if (name === "all-pages") this.applyAllPages(this.hasAttribute("all-pages"));
     else this.renderActions();
   }
@@ -1276,6 +1299,11 @@ export class ChatBox extends Base {
     if (v === this._allPages) return;
     this._allPages = v;
     this.renderAsks();
+  }
+  private applyHold(v: boolean) {
+    if (v === this._hold) return;
+    this._hold = v;
+    this.arm();
   }
   private applyMic(v: boolean) {
     if (v === this._micActive) return;
@@ -1383,6 +1411,7 @@ export class ChatBox extends Base {
     const userName = this.getAttribute("user-name");
     if (userName && !this._user.name) this._user.name = userName;
     this._micActive = this.hasAttribute("mic-active");
+    this._hold = this.hasAttribute("hold");
     this._allPages = this.hasAttribute("all-pages");
     const o = this.read("open");
     this.open = o === null ? this._defaultOpen : o === "1";
@@ -1464,7 +1493,7 @@ export class ChatBox extends Base {
   /** Files alone, no draft: they go out after the debounce, as a typed line would. */
   private armFiles() {
     this.disarm();
-    if (this._micActive || this._partial || this.composing) return;
+    if (this._micActive || this._partial || this._hold || this.composing) return;
     const bar = document.createElement("div");
     bar.className = "drain";
     bar.setAttribute("aria-hidden", "true");
@@ -2327,11 +2356,17 @@ export class ChatBox extends Base {
     this.disarm();
     // An "@/node" still being typed never goes out by the debounce.
     if (parseAddress(this._draft)?.complete === false) return;
-    const next = afterChange(this._draft, this.settledLen, this.composing);
+    const raw = afterChange(this._draft, this.settledLen, this.composing);
     if (!this.composing) this.settledLen = this._draft.length;
+    // While a mic is on, a transcript is still coming in or the draft is held, nothing goes
+    // out by itself: not the debounce, and not a jump that ends a sentence (a paste).
+    const next = autoSend(raw, {
+      mic: this._micActive,
+      partial: !!this._partial,
+      hold: this._hold,
+    });
     if (next === "send") return void this.submit();
-    // While a mic is on or a transcript is still coming in, nothing goes out by itself.
-    if (next === "idle" || this._micActive || this._partial) return;
+    if (next === "idle") return;
     // A fresh bar on each keystroke drains for the debounce.
     const bar = document.createElement("div");
     bar.className = "drain";

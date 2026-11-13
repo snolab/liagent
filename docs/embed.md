@@ -357,7 +357,8 @@ effect.
 | `treeRepo`      | `string`                                          | `owner/repo` that a bare `#123` in the tree links to.                                                                                                                                                                                                   |
 | `treeStrings`   | `Partial<TreeStrings>`                            | The tree's strings (English; Chinese on a `zh` page).                                                                                                                                                                                                   |
 | `strings`       | `Partial<UiStrings>`                              | The box's own strings (English; Chinese on a `zh` page, under yours).                                                                                                                                                                                   |
-| `micActive`     | `boolean`                                         | A mic is on: treated as focus (the log opens, the box is opaque), and the debounce never sends by itself. Attribute: `mic-active`.                                                                                                                      |
+| `micActive`     | `boolean`                                         | A mic is on: treated as focus (the log opens, the box is opaque), and neither the debounce nor a sentence jump sends by itself. Attribute: `mic-active`.                                                                                                |
+| `hold`          | `boolean`                                         | Keeps the draft without the mic look: no debounce or sentence-jump sends. Enter and `submit()` still send. Attribute: `hold`.                                                                                                                           |
 | `voice`         | `ChatVoice`                                       | `{ speak(text, id?), stop(why?) }`: reads replies aloud instead of `speechSynthesis`. See [Voice input and output](#voice-input-and-output).                                                                                                            |
 | `actions`       | `ChatAction[]`                                    | The + menu's items and the bar's own buttons, each placed by `place` (`"menu"`, `"leading"`, `"trailing"`). See [The + menu](#the--menu).                                                                                                               |
 | `micPlacement`  | `"trailing" \| "leading" \| "inside" \| "hidden"` | Where the slotted mic goes: the bar's end (default), its start (after the mark), inside the input's cell (it folds away with the input when minimized), or not shown. Attribute: `mic-placement`.                                                       |
@@ -430,6 +431,7 @@ name from a visually hidden span instead.
 - `agent-avatar`, `user-avatar`, `user-name`: the same as the properties
   (read once, when attached).
 - `mic-active`: the same as `micActive` (watched).
+- `hold`: the same as `hold` (watched).
 - `mic-placement`, `tree-placement`: the same as the properties (watched).
 - `all-pages` (property `allPages`, watched): your hub widens code grants to
   every page of the user. A code request then says "on all your pages,
@@ -674,13 +676,13 @@ hands-free voice goes on.
 
 What the mic uses on the box (`box` is its parent element):
 
-| Member                                  | Meaning                                                                                                                                                      |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `box.micActive = true` / `mic-active`   | The mic is on: treated as focus (the log opens to 30vh, the box is opaque), every reply is read aloud, and the debounce never sends by itself.               |
-| `box.setPartial(text \| null)`          | A live transcript, shown dimmed after the draft; never committed. `null` clears it. While one shows, the debounce waits.                                     |
-| `box.draft`                             | The draft as it is now (what the user typed, or earlier dictation).                                                                                          |
-| `box.setDraft(text, { source: "stt" })` | Sets the draft (the whole input) as dictation. Sent unchanged, the line goes out with `source: "stt"`; anything typed into it first makes it the user's own. |
-| `box.submit() → boolean`                | Sends the draft as Enter would; true if it went out.                                                                                                         |
+| Member                                  | Meaning                                                                                                                                                              |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `box.micActive = true` / `mic-active`   | The mic is on: treated as focus (the log opens to 30vh, the box is opaque), every reply is read aloud, and neither the debounce nor a sentence jump sends by itself. |
+| `box.setPartial(text \| null)`          | A live transcript, shown dimmed after the draft; never committed. `null` clears it. While one shows, automatic sends wait.                                           |
+| `box.draft`                             | The draft as it is now (what the user typed, or earlier dictation).                                                                                                  |
+| `box.setDraft(text, { source: "stt" })` | Sets the draft (the whole input) as dictation. Sent unchanged, the line goes out with `source: "stt"`; anything typed into it first makes it the user's own.         |
+| `box.submit() → boolean`                | Sends the draft as Enter would; true if it went out.                                                                                                                 |
 
 So a final transcript is usually `box.setDraft(joined(box.draft, text), { source: "stt" })`,
 then `box.submit()` when it ends a sentence.
