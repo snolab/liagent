@@ -452,10 +452,18 @@ name from a visually hidden span instead.
 | `--liagent-menu-bg`    | 92% of `--liagent-bg`                             | The + menu's fill                                                              |
 | `--liagent-accent`     | `oklch(0.55 0.12 250)`                            | The + menu's badges, the quote line                                            |
 
-The bar's corner radius is not a variable: it is
+The bar's corner radius defaults to
 `--liagent-bar-border + --liagent-bar-pad + --liagent-control / 2`, so a
 round control one line high in a corner (the mic) is concentric with it at
-any size. The mic takes `--liagent-mic-fg`, `--liagent-mic-bg`,
+any size. To square or round the top and bottom corners separately (say, to
+join the bar to a panel above it), set `--liagent-bar-radius-top` and
+`--liagent-bar-radius-bottom`; anything else on the bar can be styled with
+`liagent-box::part(bar)`.
+
+**Host state:** the element reflects its layout as a boolean attribute,
+`[open]` while it is open and `[min]` while it is minimized, so page CSS can
+style around it (`liagent-box[min] + .hint { display: none }`). These are
+output only: setting them does not open or minimize the box. The mic takes `--liagent-mic-fg`, `--liagent-mic-bg`,
 `--liagent-mic-icon`, `--liagent-mic-rec` and `--liagent-mic-talk`.
 
 **Layout:** one glass bar, `[mark | leading … | tree | + | input … | trailing … | mic]`

@@ -14,4 +14,14 @@ describe("box CSS", () => {
   it("gives the text inputs a 16px font (no iOS focus zoom)", () => {
     expect((src.match(/font-size: 16px;/g) ?? []).length).toBeGreaterThanOrEqual(2);
   });
+  it("exposes the bar: part=bar and --liagent-bar-radius-top/-bottom", () => {
+    expect(src).toContain('<div class="bar" id="bar" part="bar">');
+    expect(src).toContain(
+      "border-radius: var(--liagent-bar-radius-top, var(--bar-r)) var(--liagent-bar-radius-top, var(--bar-r)) var(--liagent-bar-radius-bottom, var(--bar-r)) var(--liagent-bar-radius-bottom, var(--bar-r));",
+    );
+  });
+  it("reflects open/minimized on the host ([open] / [min])", () => {
+    expect(src).toContain('this.toggleAttribute("open", this.open);');
+    expect(src).toContain('this.toggleAttribute("min", !this.open);');
+  });
 });
