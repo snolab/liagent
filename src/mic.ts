@@ -456,7 +456,11 @@ export function createMic(d: {
       dog = undefined;
       if (g === gen && !held && (state === "listening" || state === "capturing")) {
         stalled = true;
-        d.onError?.(Object.assign(new Error(`mic stalled: no audio for ${Math.round(stallMs / 1000)} s`), { name: "MicStalledError" }));
+        d.onError?.(
+          Object.assign(new Error(`mic stalled: no audio for ${Math.round(stallMs / 1000)} s`), {
+            name: "MicStalledError",
+          }),
+        );
       }
     }, stallMs);
   };

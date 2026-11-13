@@ -18,7 +18,11 @@ describe("sileroVad destroy", () => {
       },
     };
     const ev = { onSpeechStart() {}, onSpeechEnd() {}, onMisfire() {} };
-    const v = await sileroVad(ev as never, {} as MediaStream, async () => ({ MicVAD: { new: async () => micVad } }) as never);
+    const v = await sileroVad(
+      ev as never,
+      {} as MediaStream,
+      async () => ({ MicVAD: { new: async () => micVad } }) as never,
+    );
     await v.destroy();
     expect(released).toBe(1);
     expect(closed).toBe(1);
@@ -32,7 +36,11 @@ describe("sileroVad destroy", () => {
       destroy: async () => void released++,
     };
     const ev = { onSpeechStart() {}, onSpeechEnd() {}, onMisfire() {} };
-    const v = await sileroVad(ev as never, {} as MediaStream, async () => ({ MicVAD: { new: async () => micVad } }) as never);
+    const v = await sileroVad(
+      ev as never,
+      {} as MediaStream,
+      async () => ({ MicVAD: { new: async () => micVad } }) as never,
+    );
     await v.destroy();
     expect(released).toBe(1);
   });
