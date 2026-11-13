@@ -106,6 +106,10 @@
 //     "hidden"): the slotted mic at the bar's end, its start, inside the
 //     input's cell (it then folds away with the input when minimized), or
 //     not shown.
+//   - beforesend (event, cancelable): fired just before onSend with
+//     { text, to, source, context, attachments, extra }. Listeners add fields
+//     to detail.extra (they go out as the line's `ctx`); preventDefault()
+//     keeps the draft unsent. See src/before-send.ts.
 //   - Geometry: the bar's corner radius is derived, never set:
 //     R = border + padding + control / 2 (--liagent-bar-border, 1px;
 //     --liagent-bar-pad, 2px; --liagent-control, 2.125rem). A round control
@@ -167,9 +171,12 @@ import {
   parseAddress,
   pathLabel,
   pickLang,
+  cleanCtx,
 } from "./protocol.ts";
 import { type Chat, type ChatState, createChat } from "./core.ts";
 import { pageHint, when } from "./format.ts";
+import { beforeSendEvent } from "./before-send.ts";
+export type { BeforeSendDetail } from "./before-send.ts";
 import {
   type ActionHost,
   type ChatAction,
@@ -769,7 +776,13 @@ export class ChatBox extends Base {
   onSend?: (
     text: string,
     to?: string,
-    opts?: { source?: MessageSource; context?: ChatContext; attachments?: AttachmentRef[] },
+    opts?: {
+      source?: MessageSource;
+      context?: ChatContext;
+      attachments?: AttachmentRef[];
+      /** Host fields from the `beforesend` event's `detail.extra` (sent as the line's `ctx`). */
+      ctx?: Record<string, unknown>;
+    },
   ) => boolean;
   /** The user answered a pairing request. */
   onAnswer?: (type: AnswerType, p: PairInfo, answer: Answer) => void;
@@ -2375,12 +2388,19 @@ export class ChatBox extends Base {
     const source = draftSource(this._draft, this.pure);
     const context = this._attached ?? undefined;
     const attachments = stored.map((p) => p.ref!);
+    // The host's last word on the line: `beforesend` (cancelable). Each listener
+    // adds its own fields to detail.extra (Object.assign, so several compose);
+    // they go out as the line's `ctx`. preventDefault() keeps the draft unsent.
+    const before = beforeSendEvent({ text, to, source, context, attachments });
+    if (!this.dispatchEvent(before)) return false;
+    const ctx = cleanCtx(before.detail.extra);
     const opts =
-      source || context || attachments.length
+      source || context || attachments.length || ctx
         ? {
             ...(source ? { source } : {}),
             ...(context ? { context } : {}),
             ...(attachments.length ? { attachments } : {}),
+            ...(ctx ? { ctx } : {}),
           }
         : undefined;
     if (!this.onSend?.(text, to, opts)) {

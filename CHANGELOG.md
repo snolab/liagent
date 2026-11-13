@@ -4,6 +4,14 @@
 
 ### Added
 
+- **`beforesend` on the box.** A cancelable `beforesend` event fires just
+  before `onSend` with `{ text, to, source, context, attachments, extra }`.
+  Listeners add fields to `detail.extra` (several compose); they go out as
+  the chat line's `ctx`, a plain JSON object of at most `MAX_CTX` (4000)
+  characters, checked by `cleanCtx` and kept by `parsePageMessage` and the
+  hub. `preventDefault()` keeps the draft unsent. `chat.send()` takes
+  `ctx` too. No listener: the same message as before.
+
 - **Files in the chat.** `box.files` takes the host's file handling
   (`ChatFiles`: `upload(file, onProgress, signal)` → `{id, name, type, size}`,
   `url(ref)`, and optionally `maxBytes`, `list()`, `remove(id)`,
