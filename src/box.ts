@@ -193,6 +193,7 @@ import {
   isInlineImage,
 } from "./files.ts";
 import { atEndAfter, repinEnd } from "./log-pin.ts";
+import { linkify } from "./linkify.ts";
 import { aecOn, applyAec } from "./aec.ts";
 import {
   DEBOUNCE_MS,
@@ -437,6 +438,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .log li { display: flex; align-items: flex-start; gap: 6px; }
 .text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding-top: 1px; }
+.text a { pointer-events: auto; color: inherit; text-decoration: underline; }
 .log .hint { opacity: .6; display: block; }
 .polished { all: unset; pointer-events: auto; cursor: pointer; margin-inline-start: 4px; font-size: .85em; opacity: .55; vertical-align: baseline; }
 .polished[aria-pressed="true"] { opacity: .9; }
@@ -1942,6 +1944,11 @@ export class ChatBox extends Base {
       this.onColumnScroll();
       if (Date.now() - this.userScrollAt < USER_SCROLL_MS) this.scrolledByUser();
     });
+    // A link in a line: no focus on press, so the box does not re-lay out
+    // (focus changes its layout) between press and click.
+    column.addEventListener("mousedown", (e) => {
+      if ((e.target as Element | null)?.closest?.("a[href]")) e.preventDefault();
+    });
     const userScroll = () => {
       this.userScrollAt = Date.now();
       this.ownPin = false;
@@ -2906,11 +2913,11 @@ export class ChatBox extends Base {
     return out;
   }
   private lineText(m: ChatMessage, onToggle: () => void): Node[] {
-    if (!m.edited || m.raw === undefined) return [document.createTextNode(m.text)];
+    if (!m.edited || m.raw === undefined) return linkify(m.text);
     const raw = this.rawIds.has(m.id);
     const body = document.createElement("span");
     if (raw) body.className = "raw";
-    body.textContent = raw ? m.raw : m.text;
+    body.append(...linkify(raw ? m.raw : m.text));
     const mark = document.createElement("button");
     mark.type = "button";
     mark.className = "polished";

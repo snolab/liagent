@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Links in messages.** http(s) URLs in a line's text (also polished/raw
+  text) become links, built as DOM nodes (`linkify`, `src/linkify.ts`).
+  Other origins open in a new tab with `rel="noopener noreferrer"`; the
+  page's own origin stays in the tab. Trailing `.,;:!?)]}` and quotes stay
+  outside (balanced parens stay in); links stop at 、。）」』】 and U+3000.
+  Links take clicks although the log is `pointer-events: none`, and a press
+  on one does not move focus.
 - **Box style hooks.** The bar is exposed as `part="bar"`;
   `--liagent-bar-radius-top` and `--liagent-bar-radius-bottom` set its top
   and bottom corner radii (default: the round bar as before); the host
