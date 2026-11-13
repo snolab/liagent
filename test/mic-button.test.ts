@@ -8,6 +8,7 @@ import {
   isDictationTarget,
   micLabel,
   micLive,
+  micRec,
 } from "../src/mic-button.ts";
 import {
   AEC_CONSTRAINTS,
@@ -248,5 +249,17 @@ describe("mic-audio", () => {
     await expect(
       sileroVad(ev, stream, async () => ({}) as unknown as typeof mod),
     ).rejects.toThrow();
+  });
+});
+
+describe("micRec: the host's visible capturing label", () => {
+  it("is off by default (upstream 0.2: the ring only)", () => {
+    expect(micRec({ state: "capturing" })).toBe("");
+  });
+  it("shows the host's label only while capturing", () => {
+    const t = { ...MIC_STRINGS_EN, rec: "録音" };
+    expect(micRec({ state: "capturing" }, t)).toBe("録音");
+    expect(micRec({ state: "listening" }, t)).toBe("");
+    expect(micRec({ state: "off" }, t)).toBe("");
   });
 });

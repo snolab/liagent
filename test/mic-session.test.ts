@@ -536,4 +536,199 @@ describe("mic session: off while the VAD is still loading (deferred init)", () =
     expect(f.calls.stops).toBe(1);
     expect(s.view().state).toBe("off");
   });
+  it("a VAD that rejects during startup leaves the mic off with its tracks stopped", async () => {
+    const f = fakes();
+    f.deps.load = async () => {
+      throw new Error("AudioWorklet init failed");
+    };
+    f.deps.fallback = undefined;
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    expect(s.view().state).toBe("off");
+    expect(f.calls.stops).toBe(1);
+    expect(s.stream()).toBeNull();
+  });
+  it("a fallback that also rejects still stops the tracks", async () => {
+    const f = fakes();
+    f.deps.load = async () => {
+      throw new Error("worklet");
+    };
+    f.deps.fallback = async () => {
+      throw new Error("no Web Audio");
+    };
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    expect(s.view().state).toBe("off");
+    expect(f.calls.stops).toBe(1);
+  });
+  it("a stall error clears itself when audio comes back", async () => {
+    let ev: VadEvents | null = null;
+    const f = fakes();
+    const timers: (() => void)[] = [];
+    const load = f.deps.load;
+    f.deps.load = async (e, st, c) => {
+      ev = e;
+      return load(e, st, c);
+    };
+    f.deps.stallMs = 1;
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    await new Promise((r) => setTimeout(r, 20));
+    expect((s.view().error as Error | null)?.name).toBe("MicStalledError");
+    (ev as unknown as VadEvents).onFrame?.(new Float32Array(160));
+    expect(s.view().error).toBeNull();
+    expect(s.lastFrameAt()).toBeGreaterThan(0);
+    void timers;
+    await s.off();
+  });
+  it("quick off/on during a slow teardown: one teardown, the new on gets a fresh live stream", async () => {
+    const f = fakes();
+    let release: () => void = () => {};
+    const load = f.deps.load;
+    f.deps.load = async (ev, st, c) => ({
+      ...(await load(ev, st, c)),
+      destroy: () => new Promise<void>((r) => (release = r)),
+    });
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    const first = s.stream();
+    const a = s.off();
+    const b = s.off(); // the second off shares the first teardown
+    const on = s.toggle(); // a tap during teardown waits for it
+    await new Promise((r) => setTimeout(r, 5));
+    expect(f.calls.gum).toBe(1);
+    release();
+    await Promise.all([a, b, on]);
+    expect(f.calls.stops).toBe(1); // only the old stream stopped, once
+    expect(s.view().state).toBe("listening");
+    expect(f.calls.gum).toBe(2);
+    const cur = s.stream();
+    expect(cur).not.toBe(first);
+    expect(cur?.getTracks().every((t) => t.readyState === "live")).toBe(true);
+    const end = s.off();
+    await new Promise((r) => setTimeout(r, 5));
+    release();
+    await end;
+  });
+  const slow = (f: ReturnType<typeof fakes>) => {
+    const r = { release: () => {} };
+    const load = f.deps.load;
+    f.deps.load = async (ev, st, c) => ({
+      ...(await load(ev, st, c)),
+      destroy: () => new Promise<void>((done) => (r.release = done)),
+    });
+    return r;
+  };
+  const wait = () => new Promise((r) => setTimeout(r, 5));
+  it("an off() during teardown cancels a tap waiting on it: the mic stays off (closed window)", async () => {
+    const f = fakes();
+    const r = slow(f);
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    const a = s.off();
+    const tap = s.toggle(); // the user taps on during cleanup
+    const close = s.off(); // then the window closes
+    await wait();
+    r.release();
+    await Promise.all([a, tap, close]);
+    expect(s.view().state).toBe("off");
+    expect(f.calls.gum).toBe(1);
+    expect(s.stream()).toBeNull();
+  });
+  it("two taps during teardown collapse to the last intent (off)", async () => {
+    const f = fakes();
+    const r = slow(f);
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    const a = s.off();
+    const t1 = s.toggle();
+    const t2 = s.toggle();
+    await wait();
+    r.release();
+    await Promise.all([a, t1, t2]);
+    expect(s.view().state).toBe("off");
+    expect(f.calls.gum).toBe(1);
+  });
+  it("three taps during teardown end on", async () => {
+    const f = fakes();
+    const r = slow(f);
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    const a = s.off();
+    const taps = [s.toggle(), s.toggle(), s.toggle()];
+    await wait();
+    r.release();
+    await Promise.all([a, ...taps]);
+    expect(s.view().state).toBe("listening");
+    expect(f.calls.gum).toBe(2);
+    const end = s.off();
+    await wait();
+    r.release();
+    await end;
+  });
+  it("retry alone: off, then listening on a new stream", async () => {
+    const f = fakes();
+    const r = slow(f);
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    const first = s.stream();
+    const re = s.retry();
+    await wait();
+    expect(s.view().state).toBe("off"); // the button reads off during cleanup
+    r.release();
+    await re;
+    expect(s.view().state).toBe("listening");
+    expect(f.calls.gum).toBe(2);
+    expect(s.stream()).not.toBe(first);
+    expect(first?.getTracks().every((t) => t.readyState === "ended")).toBe(true);
+    const end = s.off();
+    await wait();
+    r.release();
+    await end;
+  });
+  it("retry + 1 tap during cleanup ends on; the tap, not the retry, decides", async () => {
+    const f = fakes();
+    const r = slow(f);
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    const re = s.retry();
+    const t1 = s.toggle();
+    await wait();
+    r.release();
+    await Promise.all([re, t1]);
+    expect(s.view().state).toBe("listening");
+    expect(f.calls.gum).toBe(2);
+    const end = s.off();
+    await wait();
+    r.release();
+    await end;
+  });
+  it("retry + 2 taps during cleanup ends off, with no new stream (privacy)", async () => {
+    const f = fakes();
+    const r = slow(f);
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    const re = s.retry();
+    const t1 = s.toggle();
+    const t2 = s.toggle();
+    await wait();
+    r.release();
+    await Promise.all([re, t1, t2]);
+    expect(s.view().state).toBe("off");
+    expect(f.calls.gum).toBe(1);
+    expect(s.stream()).toBeNull();
+  });
+  it("an off() (window closing) during a retry cancels it: off", async () => {
+    const f = fakes();
+    const r = slow(f);
+    const s = createMicSession(f.deps);
+    await s.toggle();
+    const re = s.retry();
+    const close = s.off();
+    await wait();
+    r.release();
+    await Promise.all([re, close]);
+    expect(s.view().state).toBe("off");
+    expect(f.calls.gum).toBe(1);
+  });
 });
