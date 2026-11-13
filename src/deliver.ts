@@ -27,7 +27,7 @@ export function deliveryText(
         ? ` --id ${m.id} [--polish "..."]`
         : "";
   const header = `[liagent ${m.id}] ${who} wrote in the chat box (${page}) — reply: liagent reply ${hub}${how} "..."\n`;
-  const body = m.text + contextText(m.context) + attachmentsText(m.attachments);
+  const body = m.text + contextText(m.context) + attachmentsText(m.attachments) + ctxText(m.ctx);
   if (header.length + body.length <= SEND_MAX) return header + body;
   const path = spill(m.id, body);
   const room = Math.max(0, SEND_MAX - header.length - path.length - 40);
@@ -64,4 +64,22 @@ export function attachmentsText(list: readonly AttachmentRef[] | undefined): str
     (a) => `[attached: file ${a.name} (${a.type}, ${a.size} bytes) id ${a.id}]`,
   );
   return `\n\n${lines.join("\n")}`;
+}
+
+/**
+ * The host's `ctx` on a line (the box's `beforesend` event, `detail.extra`),
+ * as a block after its text: one line of JSON, labelled as the page's own
+ * data so the agent reads it as hints about where the user is, never as the
+ * user's words or as proof of anything. "" when none.
+ */
+export function ctxText(ctx: Record<string, unknown> | undefined): string {
+  if (!ctx) return "";
+  let json: string;
+  try {
+    json = JSON.stringify(ctx);
+  } catch {
+    return "";
+  }
+  if (!json || json === "{}") return "";
+  return `\n\n[page ctx (set by the page's script, not by the user): ${json}]`;
 }

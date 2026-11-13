@@ -15,6 +15,7 @@ export {
   type SelectionActionOptions,
   type TreePlacement,
   type UploadedFile,
+  type BeforeSendDetail,
   type ChatFiles,
   type FileItemAction,
   type FilesListing,

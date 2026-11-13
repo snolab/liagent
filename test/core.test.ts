@@ -256,6 +256,22 @@ describe("createChat sending", () => {
     });
   });
 
+  it("sends a line's ctx (cleaned) and keeps it on a retry; an empty or invalid one is left out", () => {
+    const f = fakeTransport();
+    let n = 0;
+    const chat = createChat({ transport: f.t, newId: () => `id${++n}` });
+    chat.start();
+    chat.send("hi", { ctx: { page: "/x" } });
+    chat.receive({ type: "rate-limited", id: "id1", retryIn: 1000 });
+    expect(chat.retry("id1")).toBe(true);
+    expect(f.sent[0]).toEqual({ type: "chat", id: "id1", text: "hi", ctx: { page: "/x" } });
+    expect(f.sent[1]).toEqual(f.sent[0]);
+    chat.send("a", { ctx: {} });
+    chat.send("b", { ctx: [1] as unknown as Record<string, unknown> });
+    expect(f.sent[2]).toEqual({ type: "chat", id: "id2", text: "a" });
+    expect(f.sent[3]).toEqual({ type: "chat", id: "id3", text: "b" });
+  });
+
   it("a rate-limited or dropped line fails, and retry sends it again with its id", () => {
     const f = fakeTransport();
     let n = 0;

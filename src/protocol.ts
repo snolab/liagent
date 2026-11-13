@@ -56,6 +56,23 @@ export const EVAL_GRANT_MS = 8 * 60 * 60_000;
 export const CHAT_MS = 30 * 24 * 60 * 60_000;
 /** Largest chat message (owner's or agent's), in characters. */
 export const MAX_CHAT = 4000;
+/** The longest `ctx` (host fields on a chat line), as JSON. */
+export const MAX_CTX = 4000;
+
+/** A chat line's `ctx`: a non-empty plain object that round-trips as JSON within MAX_CTX; else undefined. */
+export function cleanCtx(v: unknown): Record<string, unknown> | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  if (Object.getPrototypeOf(v) !== Object.prototype && Object.getPrototypeOf(v) !== null)
+    return undefined;
+  let json: string;
+  try {
+    json = JSON.stringify(v);
+  } catch {
+    return undefined;
+  }
+  if (!json || json === "{}" || json.length > MAX_CTX) return undefined;
+  return JSON.parse(json) as Record<string, unknown>;
+}
 /** Chat messages the hub keeps (and sends a page on connect). */
 export const CHAT_HISTORY = 200;
 /** A page shows the spinner while the agent's last busy beat is younger than this. */
@@ -138,6 +155,11 @@ export type ChatMessage = {
    * (`files.url(ref)`). Checked by cleanAttachments; owner lines only.
    */
   attachments?: AttachmentRef[];
+  /**
+   * Host fields added in the box's `beforesend` event (`detail.extra`): a
+   * plain JSON object, at most MAX_CTX characters as JSON. Checked by cleanCtx.
+   */
+  ctx?: Record<string, unknown>;
 };
 
 /** Where an owner line came from: "stt" (the box's mic). Absent = typed. */
@@ -251,6 +273,7 @@ export type PageMessage =
       source?: MessageSource;
       context?: ChatContext;
       attachments?: AttachmentRef[];
+      ctx?: Record<string, unknown>;
     }
   | {
       type: "result";
@@ -392,6 +415,8 @@ export function parsePageMessage(raw: unknown): PageMessage | null {
     if (context) out.context = context;
     const attachments = cleanAttachments(m.attachments);
     if (attachments) out.attachments = attachments;
+    const ctx = cleanCtx(m.ctx);
+    if (ctx) out.ctx = ctx;
     return out;
   }
   if (m.type === "result") {
