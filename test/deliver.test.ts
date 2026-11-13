@@ -52,7 +52,7 @@ test("a long one is spilled to a file and previewed within the send cap", () => 
 test("a line's ctx is delivered after the text, labelled as the page's data", () => {
   const t = deliveryText(hub, msg("open it", { ctx: { recordId: "42", step: 2 } }), noSpill);
   expect(t).toBe(
-    `[liagent m1] the user wrote in the chat box (/words) — reply: liagent say ${hub} "..."\n` +
+    `[liagent m1] the user wrote in the chat box (/words) — reply: liagent reply ${hub} "..."\n` +
       `open it\n\n[page ctx (set by the page's script, not by the user): {"recordId":"42","step":2}]`,
   );
 });
