@@ -7,8 +7,8 @@
 /** A piece of message text: plain, or a URL to link. */
 export type TextPart = { text: string } | { text: string; url: string };
 
-// A URL runs to whitespace (incl. U+3000), `<>"`, or Japanese 、。）」』】.
-const URL_RE = /\bhttps?:\/\/[^\s　<>"、。）」』】]+/gi;
+// A URL runs to whitespace (incl. U+3000), `<>"`, or Japanese 、。and full-width brackets （）「」『』【】〔〕.
+const URL_RE = /\bhttps?:\/\/[^\s　<>"、。（）「」『』【】〔〕]+/gi;
 const TRAIL = /[.,;:!?'"\]}）]$/;
 const OPEN: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
 

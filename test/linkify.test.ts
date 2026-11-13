@@ -22,7 +22,21 @@ describe("linkParts: boundaries", () => {
     expect(trimUrl("https://a.example/[x]")).toBe("https://a.example/[x]");
   });
   it("stops at Japanese punctuation and full-width spaces", () => {
-    for (const stop of ["、", "。", "）", "」", "』", "】", "　"])
+    for (const stop of [
+      "、",
+      "。",
+      "（",
+      "）",
+      "「",
+      "」",
+      "『",
+      "』",
+      "【",
+      "】",
+      "〔",
+      "〕",
+      "　",
+    ])
       expect(urls(`「https://form.symval.net/a?b=1${stop}次`)).toEqual([
         "https://form.symval.net/a?b=1",
       ]);
