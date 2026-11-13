@@ -24,4 +24,8 @@ describe("box CSS", () => {
     expect(src).toContain('this.toggleAttribute("open", this.open);');
     expect(src).toContain('this.toggleAttribute("min", !this.open);');
   });
+  it("lets the host size the log (--liagent-log-max, --liagent-log-max-wide)", () => {
+    expect(src).toMatch(/\.column \{\s*max-height: var\(--liagent-log-max, 4\.4rem\)/);
+    expect(src).toContain(".column.wide { max-height: var(--liagent-log-max-wide, 30vh); }");
+  });
 });

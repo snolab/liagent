@@ -38,6 +38,17 @@ export function lineBreakSends(
 }
 
 /**
+ * What the draft change does once the box's holds apply: a mic that is on, a
+ * live partial, or an explicit hold stop both the jump-send and the debounce.
+ */
+export function autoSend(
+  next: "send" | "arm" | "idle",
+  held: { mic?: boolean; partial?: boolean; hold?: boolean },
+): "send" | "arm" | "idle" {
+  return held.mic || held.partial || held.hold ? "idle" : next;
+}
+
+/**
  * After the draft changed outside a composition: "send" now (a dictated
  * sentence), "arm" the debounce, or "idle" (nothing to send). `settledLen` is
  * the draft's length at the previous settled change.
