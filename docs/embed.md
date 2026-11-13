@@ -396,6 +396,10 @@ box.addEventListener("beforesend", (e) => {
 
 With your own transport, `onSend` gets it as `opts.ctx`; `connectHub` and
 `chat.send(text, { ctx })` send it, and the hub keeps it on the line.
+`liagent listen --to` delivers it to the agent after the text (and after
+the selection and the files) as one line of JSON,
+`[page ctx (set by the page's script, not by the user): {"recordId":"42"}]`,
+in the spilled file too when the message is long.
 
 - `submit() → boolean`: sends the draft now, as Enter would; true if it went
   out.

@@ -10,7 +10,9 @@
   the chat line's `ctx`, a plain JSON object of at most `MAX_CTX` (4000)
   characters, checked by `cleanCtx` and kept by `parsePageMessage` and the
   hub. `preventDefault()` keeps the draft unsent. `chat.send()` takes
-  `ctx` too. No listener: the same message as before.
+  `ctx` too. `liagent listen --to` delivers it after the text as
+  `[page ctx (set by the page's script, not by the user): {…}]`, in the
+  spilled file too. No listener: the same message as before.
 
 - **Files in the chat.** `box.files` takes the host's file handling
   (`ChatFiles`: `upload(file, onProgress, signal)` → `{id, name, type, size}`,
