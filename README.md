@@ -15,6 +15,8 @@ bun add liagent
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `liagent`                                           | the box, `connectHub`, and the protocol (browser)                                                       |
 | `liagent/box`, `liagent/client`, `liagent/protocol` | each part on its own                                                                                    |
+| `liagent/core`                                      | headless: the chat session with no UI (`createChat`, `hubTransport`), for hosts that draw their own     |
+| `liagent/react`                                     | React hooks over the core: `useHubChat`, `useChatState`, `useDraft` (react is an optional peer)         |
 | `liagent/ui`                                        | the box's pure parts (tree nav, detents, floating lines, echo guard…), for hosts that draw their own UI |
 | `liagent/mic`                                       | `<liagent-mic>`: voice input into the box (VAD, your STT endpoint), and its pure parts                  |
 | `liagent/voice`                                     | hands-free voice out: a sentence queue, barge-in, ducking, the echo guard, your TTS endpoint (optional) |
@@ -139,6 +141,31 @@ wide, so at any size it stays concentric with the corner it sits in. The
 mic's look: `--liagent-mic-fg`, `--liagent-mic-bg`, `--liagent-mic-icon`,
 `--liagent-mic-rec`, `--liagent-mic-talk`.
 
+## Headless: your own UI
+
+`liagent/core` is the chat without the box: the hub session, the message
+list, pairing, sessions, busy, and the outbox, as a store any framework can
+draw. The box is drawn from the same store.
+
+```ts
+import { createChat, hubTransport } from "liagent/core";
+
+const chat = createChat({ transport: hubTransport({ url: "/api/chat" }) });
+chat.subscribe(() => render(chat.getState())); // a frozen snapshot, replaced on change
+chat.on("message", (m, { live }) => live && m.from === "agent" && voice.speak(m.text, m.id));
+chat.start(); // stop() and start() again freely; close() for good
+
+chat.send("Make the toggle bigger"); // false: not sent, so keep the draft
+chat.allow(pair, { pages: "all" }); // only from a user's tap: refused otherwise
+```
+
+`createDraft` / `bindDraft` give any input the box's sending rules,
+`connectVoice(chat, voice())` reads replies aloud, and `liagent/react` has
+`useHubChat`, `useChatState` and `useDraft`. Render message text as text
+only, never as HTML. [docs/headless.md](docs/headless.md) is the guide, with
+Vue, Svelte and Solid recipes; `examples/headless/` and
+`examples/react/HeadlessChat.tsx` are UIs built from scratch.
+
 ## Voice input
 
 ```html
@@ -187,6 +214,10 @@ while the agent speaks and while the page plays its own sounds (wrap them in
 `pageAudio().start()`, and call the function it returns when they end). A
 change reopens an open mic at once. See
 [docs/embed.md](docs/embed.md#9-hands-free-voice).
+
+A line's own `lang` (a BCP-47 tag: `liagent say --lang fr-FR …`, or `lang`
+on a message you push) picks its reading language; without it the language
+is guessed from the script (ja/ko/zh, else English).
 
 Not every line should be spoken. `liagent say --quiet` lines are shown but
 never read, and a hidden page never speaks (hiding it stops the reading).

@@ -10,6 +10,7 @@
 //   GET <BASE>/                  demo/index.html: the box with a fake agent
 //   GET <BASE>/?hub              the same box on the dev hub (connectHub)
 //   GET <BASE>/react.html        examples/react (HubChat → LiagentChat) on the dev hub
+//   GET <BASE>/headless-react.html  examples/react/HeadlessChat (liagent/react, no box) on the dev hub
 //   GET <BASE>/examples/<fw>/    examples/{html,vue,svelte,angular,solid,preact}: a fake
 //                                agent, or the dev hub with ?hub
 //   WS  <BASE>/api/chat          the hub's page socket; every page is the owner
@@ -117,6 +118,7 @@ Bun.serve<Data>({
     }
     if (path === `${BASE}/liagent.js`) return bundle();
     if (path === `${BASE}/react.js`) return bundle("demo/react.tsx");
+    if (path === `${BASE}/headless-react.js`) return bundle("demo/headless-react.tsx");
     // examples/<framework>/index.html, which import ../../liagent.js (above).
     const ex = path.match(new RegExp(`^${BASE}/examples/([a-z-]+)/?(index\\.html)?$`));
     if (ex)
@@ -125,6 +127,10 @@ Bun.serve<Data>({
       });
     if (path === `${BASE}/react.html`)
       return new Response(Bun.file(join(root, "demo/react.html")), {
+        headers: { ...cors, "content-type": "text/html; charset=utf-8" },
+      });
+    if (path === `${BASE}/headless-react.html`)
+      return new Response(Bun.file(join(root, "demo/headless-react.html")), {
         headers: { ...cors, "content-type": "text/html; charset=utf-8" },
       });
     if (path === BASE || path === `${BASE}/` || path === `${BASE}/index.html`)

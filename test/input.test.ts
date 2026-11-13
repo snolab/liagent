@@ -67,3 +67,36 @@ describe("autoSend", () => {
     }
   });
 });
+
+// Exercise the box wiring without mounting its UI.
+describe("box automatic sends", () => {
+  test("mic, partial and hold keep a pasted sentence in the box", async () => {
+    const { ChatBox } = await import("../src/box.ts");
+    for (const held of ["mic", "partial", "hold"]) {
+      const box = new ChatBox();
+      let sent = false;
+      box.submit = () => {
+        sent = true;
+        return true;
+      };
+      // Set internal flags to avoid rendering the absent DOM.
+      Object.assign(box, {
+        _micActive: held === "mic",
+        _partial: held === "partial" ? "more" : "",
+        _hold: held === "hold",
+      });
+      Object.assign(box, { _draft: "Hello there, how are you today." });
+      (box as unknown as { arm(): void }).arm();
+      expect(sent).toBe(false);
+      expect(box.draft).toBe("Hello there, how are you today.");
+    }
+  });
+  test("hold also blocks the files-only debounce", async () => {
+    const { ChatBox } = await import("../src/box.ts");
+    const box = new ChatBox();
+    box.hold = true;
+    // Without the guard this tries to create a drain bar in the absent DOM.
+    (box as unknown as { armFiles(): void }).armFiles();
+    expect(box.hold).toBe(true);
+  });
+});

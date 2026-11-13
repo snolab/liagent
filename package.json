@@ -72,6 +72,18 @@
       "import": "./dist/tree.js",
       "default": "./dist/tree.js"
     },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "browser": "./dist/core.js",
+      "import": "./dist/core.js",
+      "default": "./dist/core.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "browser": "./dist/react.js",
+      "import": "./dist/react.js",
+      "default": "./dist/react.js"
+    },
     "./client": {
       "types": "./dist/client.d.ts",
       "browser": "./dist/client.js",
@@ -125,6 +137,14 @@
     "tsdown": "^0.20.3",
     "tsrs": "0.20.1-ts7.1.0-beta",
     "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
   },
   "engines": {
     "bun": ">=1.2"

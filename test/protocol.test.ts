@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   MAX_CHAT,
+  MAX_LANG,
+  langTag,
   type ChatMessage,
   applyEdit,
   dictatedDraft,
@@ -42,6 +44,29 @@ describe("parseControllerMessage", () => {
     });
     for (const v of ["true", 1, false, null, {}, [true]])
       expect(say({ quiet: v, loud: v })).toEqual({ ok: true, value: { type: "say", text: "hi" } });
+  });
+  test("say keeps lang only as a BCP-47-shaped tag", () => {
+    const say = (extra: Record<string, unknown>) =>
+      parseControllerMessage(JSON.stringify({ type: "say", text: "hi", ...extra }));
+    expect(say({ lang: "fr-FR" })).toEqual({
+      ok: true,
+      value: { type: "say", text: "hi", lang: "fr-FR" },
+    });
+    expect(say({ lang: " de " })).toEqual({
+      ok: true,
+      value: { type: "say", text: "hi", lang: "de" },
+    });
+    for (const v of ["", "f", "fr FR", "fr_FR", "x".repeat(40), 1, true, null, {}, ["fr"]])
+      expect(say({ lang: v })).toEqual({ ok: true, value: { type: "say", text: "hi" } });
+  });
+  test("langTag: a language, then letter or digit subtags, at most MAX_LANG long", () => {
+    for (const t of ["fr", "fr-FR", "de-CH", "zh-Hant-TW", "es-419", "yue", "sr-Latn-RS"])
+      expect(langTag(t)).toBe(t);
+    expect(langTag("  pt-BR ")).toBe("pt-BR");
+    for (const v of ["", " ", "-fr", "fr-", "fr--FR", "1a", "fr-FR!", "fr-abcdefghi", undefined])
+      expect(langTag(v)).toBeUndefined();
+    expect(langTag(`en${"-abcdefgh".repeat(4)}`)).toBeUndefined(); // 38 chars
+    expect(MAX_LANG).toBe(35);
   });
   test("say needs text within MAX_CHAT", () => {
     expect(parseControllerMessage('{"type":"say","text":"  "}').ok).toBe(false);

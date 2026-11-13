@@ -67,9 +67,11 @@
 //     that node (typing "@/" offers `nodes`); the target is a removable chip.
 //     box.setTarget(path) sets it from outside (a state tree's selection).
 //   - Agent replies that arrive live are read aloud, at the menu's speed:
-//     through `voice` when the host set one, else speechSynthesis in a
-//     language picked from their script; typing stops it, the menu turns it
-//     off for the device, and iOS is unlocked on the first gesture.
+//     through `voice` when the host set one, else speechSynthesis. The
+//     language is the message's own `lang` (a BCP-47 tag) if it has one,
+//     else `voicePrefer.lang`, else one picked from the script (ja/ko/zh/en);
+//     typing stops it, the menu turns it off for the device, and iOS is
+//     unlocked on the first gesture.
 //   - Quiet lines (src/speak-rules.ts): a line with `quiet: true` is never
 //     read; a hidden page never speaks, and hiding it stops the reading. A
 //     line kept silent fires `liagent-silent` {id, why}.
@@ -133,8 +135,9 @@
 //     dictated sentence).
 //   - box.hold = true (or the hold attribute) keeps the draft the same way
 //     without the mic look; Enter and box.submit() still send.
-//   - box.voice = { speak(text, id?), stop(why?) } reads replies aloud instead
-//     of speechSynthesis; typing calls voice.stop("typing"). box.speechRate is
+//   - box.voice = { speak(text, id?, { lang? }?), stop(why?) } reads replies
+//     aloud instead of speechSynthesis (the third argument only for a line
+//     with its own `lang`); typing calls voice.stop("typing"). box.speechRate is
 //     the menu's speed for it to apply. Without it, box.voicePrefer =
 //     { lang?, prefer? } picks the speechSynthesis voice (src/voice-pick.ts).
 //
@@ -148,13 +151,10 @@
 // badges and the quote line), and the mic's own (src/mic-button.ts).
 
 import {
-  BUSY_AFTER_REPLY_MS,
-  BUSY_MS,
   type AttachmentRef,
   type ChatContext,
   type ChatMessage,
   type EditedEvent,
-  applyEdit,
   MAX_CHAT,
   type MessageSource,
   type PageInfo,
@@ -163,14 +163,16 @@ import {
   completeNode,
   dictatedDraft,
   draftSource,
+  langTag,
   lineNode,
   mergeContext,
   nodePath,
   parseAddress,
   pathLabel,
   pickLang,
-  trimHistory,
 } from "./protocol.ts";
+import { type Chat, type ChatState, createChat } from "./core.ts";
+import { pageHint, when } from "./format.ts";
 import {
   type ActionHost,
   type ChatAction,
@@ -243,6 +245,7 @@ import type { Assignee } from "./state-tree.ts";
 /** A scroll this soon after the user's wheel, touch, pointer or key is theirs. */
 const USER_SCROLL_MS = 1000;
 
+export { pageHint, when } from "./format.ts";
 export {
   type AvatarSrc,
   type Sender,
@@ -294,31 +297,14 @@ export type Answer = { pages?: string[] | "all"; scope?: "chat" };
 
 /**
  * A voice output the host plugs in (box.voice): replies are read through it
- * instead of speechSynthesis. `id` is the message's id; `stop` gets why
+ * instead of speechSynthesis. `id` is the message's id; `opts.lang` is the
+ * message's own language (passed only when it has one); `stop` gets why
  * ("typing", "off").
  */
-export type ChatVoice = { speak(text: string, id?: string): void; stop(why?: string): void };
-
-/** A page's label is "<path> <user agent>": the path and a short device hint. */
-export function pageHint(label: string): string {
-  const [path = "", ...rest] = label.split(" ");
-  const ua = rest.join(" ");
-  const device = /iPhone/.test(ua)
-    ? "iPhone"
-    : /iPad/.test(ua)
-      ? "iPad"
-      : /Android/.test(ua)
-        ? "Android"
-        : /Macintosh|Mac OS/.test(ua)
-          ? "Mac"
-          : /Windows/.test(ua)
-            ? "Windows"
-            : /Linux|X11/.test(ua)
-              ? "Linux"
-              : (ua.split(" ").find((w) => w !== "pwa") ?? "");
-  const pwa = /(^| )pwa( |$)/.test(ua) ? " app" : "";
-  return device ? `${path} · ${device}${pwa}` : path;
-}
+export type ChatVoice = {
+  speak(text: string, id?: string, opts?: { lang?: string }): void;
+  stop(why?: string): void;
+};
 
 const Base: typeof HTMLElement =
   typeof HTMLElement === "undefined" ? (class {} as unknown as typeof HTMLElement) : HTMLElement;
@@ -359,15 +345,6 @@ function safeInsets() {
   };
   probe.remove();
   return v;
-}
-
-const pad = (n: number) => String(n).padStart(2, "0");
-/** HH:MM:SS today, YYYY-MM-DD HH:MM before — local time, ISO order. */
-export function when(at: number, now = new Date()) {
-  const d = new Date(at);
-  const day = (x: Date) => `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`;
-  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  return day(d) === day(now) ? `${hm}:${pad(d.getSeconds())}` : `${day(d)} ${hm}`;
 }
 
 /** The input grows to about five lines, then scrolls inside itself. */
@@ -820,8 +797,9 @@ export class ChatBox extends Base {
    */
   avatarFor?: (m: ChatMessage) => Sender | null | undefined;
   /**
-   * A voice output (`{ speak(text, id?), stop(why?) }`): replies are read
-   * through it instead of speechSynthesis. Typing calls `stop("typing")`.
+   * A voice output (`{ speak(text, id?, { lang? }?), stop(why?) }`): replies
+   * are read through it instead of speechSynthesis. Typing calls
+   * `stop("typing")`.
    */
   voice?: ChatVoice | null;
   /**
@@ -832,6 +810,10 @@ export class ChatBox extends Base {
    */
   voicePrefer?: VoicePreference | null;
 
+  private _chat?: Chat;
+  private unchat: (() => void)[] = [];
+  /** The chat state last drawn. */
+  private seen?: ChatState;
   private _messages: ChatMessage[] = [];
   private _live = false;
   private _listeners = 0;
@@ -839,8 +821,6 @@ export class ChatBox extends Base {
   private _pending: PairInfo | null = null;
   private _evalRan = false;
   private _busy = false;
-  private busyTimer?: ReturnType<typeof setTimeout>;
-  private lastReplyAt = 0;
   private _pages: PageInfo[] = [];
   private _self = "";
   /** The pages ticked in the pairing request, per pair id. */
@@ -953,35 +933,85 @@ export class ChatBox extends Base {
 
   // ---- inputs ---------------------------------------------------------------
 
+  /**
+   * The headless chat (src/core.ts) this box draws: its state and its
+   * messages. connectHub sets one on a hub; unset, the box keeps its own,
+   * which the setters below write into (your own transport).
+   */
+  get chat(): Chat {
+    if (!this._chat) this.chat = createChat();
+    return this._chat!;
+  }
+  set chat(c: Chat) {
+    if (c === this._chat) return;
+    for (const u of this.unchat) u();
+    this._chat = c;
+    this.seen = c.getState();
+    this.unchat = [
+      c.subscribe((s) => this.sync(s)),
+      c.on("message", (m) => {
+        this._messages = c.getState().messages as ChatMessage[];
+        this.messagesChanged(m.from !== "agent");
+        if (m.from === "agent") this.speak(m.text, m.id, m);
+      }),
+      c.on("history", () => {
+        this._messages = c.getState().messages as ChatMessage[];
+        this.messagesChanged();
+      }),
+      c.on("edit", () => {
+        this._messages = c.getState().messages as ChatMessage[];
+        this.renderLog();
+        this.renderFloatTexts();
+      }),
+    ];
+    this.sync(c.getState(), true);
+    this._messages = c.getState().messages as ChatMessage[];
+    this.messagesChanged();
+  }
+  /** Draw what changed in the chat's state (everything when `all`). */
+  private sync(s: ChatState, all = false) {
+    const p = all ? null : this.seen;
+    this.seen = s;
+    const changed = (k: keyof ChatState) => !p || p[k] !== s[k];
+    this._live = s.status === "live";
+    this._listeners = s.listeners;
+    this._nodes = s.nodes as string[];
+    this._sessions = s.sessions as PairInfo[];
+    this._pending = s.pending;
+    this._evalRan = s.evalRan;
+    this._busy = s.busy;
+    this._pages = s.pages as PageInfo[];
+    this._self = s.self;
+    this._friend = s.friend;
+    this._notice = s.notice;
+    this._warning = s.warning;
+    if (changed("status") || changed("listeners")) this.renderStatus();
+    if (changed("nodes")) this.renderAim();
+    if (changed("sessions") || changed("evalRan")) this.renderEvals();
+    if (changed("pending") || changed("pages") || changed("self") || changed("friend"))
+      this.renderAsks();
+    if (changed("sessions") || changed("pages") || changed("self")) this.renderMenu();
+    if (changed("busy")) this.renderBusy();
+    if (changed("notice") || changed("warning")) this.renderInput();
+  }
+
   get messages() {
     return this._messages;
   }
   /** Replace the log (history on connect): never read aloud. */
   set messages(v: ChatMessage[]) {
-    this._messages = trimHistory(Array.isArray(v) ? v : []);
-    this.messagesChanged();
+    this.chat.setMessages(v);
   }
   /** One message that arrived live: kept once per id; an agent's is read aloud. */
   push(m: ChatMessage) {
-    if (!m || typeof m.text !== "string" || typeof m.id !== "string") return;
-    if (this._messages.some((x) => x.id === m.id)) return;
-    this._messages = trimHistory([...this._messages, m]);
-    this.messagesChanged(m.from !== "agent");
-    if (m.from !== "agent") return;
-    // A reply ends the spinner for the work it answers.
-    this.lastReplyAt = Date.now();
-    this.busy = false;
-    this.speak(m.text, m.id, m);
+    this.chat.push(m);
   }
   /**
    * The agent polished a voice line ({type:"edited"}): it changes in place,
    * and is never read aloud again.
    */
   edit(e: Omit<EditedEvent, "type">) {
-    if (!e || typeof e.id !== "string" || typeof e.text !== "string") return;
-    this._messages = this._messages.map((m) => applyEdit(m, e));
-    this.renderLog();
-    this.renderFloatTexts();
+    this.chat.edit(e);
   }
   /**
    * One busy beat from the agent: the spinner shows for BUSY_MS unless the
@@ -989,21 +1019,17 @@ export class ChatBox extends Base {
    * (BUSY_AFTER_REPLY_MS) is that work's tail, and ignored.
    */
   beat(at = Date.now()) {
-    if (at - this.lastReplyAt < BUSY_AFTER_REPLY_MS) return;
-    this.busy = true;
-    this.busyTimer = setTimeout(() => (this.busy = false), BUSY_MS);
+    this.chat.beat(at);
   }
   set live(v: boolean) {
-    this._live = !!v;
-    this.renderStatus();
+    this.chat.set({ status: v ? "live" : "offline" });
   }
   get live() {
     return this._live;
   }
   /** The state-tree nodes agents listen at (the hub's `state.nodes`): "@/…" completions. */
   set nodes(v: string[]) {
-    this._nodes = Array.isArray(v) ? v.filter((n) => typeof n === "string") : [];
-    this.renderAim();
+    this.chat.set({ nodes: v });
   }
   /** The node the next line goes to ("/" = the main thread). */
   get target() {
@@ -1017,60 +1043,46 @@ export class ChatBox extends Base {
   }
   /** Agents listening now (shown in the status). */
   set listeners(v: number) {
-    this._listeners = Number(v) || 0;
-    this.renderStatus();
+    this.chat.set({ listeners: v });
   }
   /** Approved sessions: a count on the tree button for eval, and a line with End in the menu. */
   set sessions(v: PairInfo[]) {
-    this._sessions = Array.isArray(v) ? v : [];
-    this.renderEvals();
-    this.renderMenu();
+    this.chat.set({ sessions: v });
   }
   /** A pairing waiting for the owner's answer. */
   set pending(v: PairInfo | null) {
-    this._pending = v ?? null;
-    this.renderAsks();
+    this.chat.set({ pending: v });
   }
   /** Code just ran on this page: the eval count pulses. */
   set evalRan(v: boolean) {
-    this._evalRan = !!v;
-    this.renderEvals();
+    this.chat.set({ evalRan: v });
   }
   /** The agent is working: a spinner in the input. */
   set busy(v: boolean) {
-    clearTimeout(this.busyTimer);
-    this._busy = !!v;
-    this.renderBusy();
+    this.chat.set({ busy: v });
   }
   get busy() {
     return this._busy;
   }
   /** The user's connected pages (the hub's state.pages): offered when allowing, ended from the menu. */
   set pages(v: PageInfo[]) {
-    this._pages = Array.isArray(v) ? v : [];
-    this.renderAsks();
-    this.renderMenu();
+    this.chat.set({ pages: v });
   }
   /** Which of `pages` this page is (the hub's state.self). */
   set self(v: string) {
-    this._self = v ?? "";
-    this.renderAsks();
-    this.renderMenu();
+    this.chat.set({ self: v });
   }
   /** A friend's page (not the user's): pairings are previews, with no chat scope to grant. */
   set friend(v: boolean) {
-    this._friend = !!v;
-    this.renderAsks();
+    this.chat.set({ friend: v });
   }
   /** Shown instead of the input when this viewer cannot chat. */
   set notice(v: string | undefined) {
-    this._notice = v ?? "";
-    this.renderInput();
+    this.chat.set({ notice: v });
   }
   /** A one-line note above the input (say, a message dropped by a rate limit). */
   set warning(v: string | undefined) {
-    this._warning = v ?? "";
-    this.renderInput();
+    this.chat.set({ warning: v });
   }
   /** Open or minimized on first visit (later visits remember). Attribute: collapsed. */
   set defaultOpen(v: boolean) {
@@ -1360,10 +1372,11 @@ export class ChatBox extends Base {
 
   /**
    * Read a reply aloud, after any still being read (always while a mic is on):
-   * through `voice` if set, else speechSynthesis, in the language its script
-   * suggests (with a matching installed voice), at `speechRate`. `line`
-   * (the message's `quiet`) is checked first, with the page's visibility
-   * (src/speak-rules.ts), for both outputs.
+   * through `voice` if set, else speechSynthesis, at `speechRate`. `line` is
+   * the message: its `quiet` is checked first, with the page's visibility
+   * (src/speak-rules.ts), for both outputs; its `lang` (a BCP-47 tag) is the
+   * reading language, ahead of `voicePrefer.lang` and the script's guess
+   * (with a matching installed voice).
    */
   speak(text: string, id?: string, line: SpeakMeta = {}) {
     const why = silenceFor(line, { hidden: pageHidden() });
@@ -1372,11 +1385,12 @@ export class ChatBox extends Base {
       return;
     }
     if (!this.speaking && !this._micActive) return;
-    if (this.voice) return this.voice.speak(text, id);
+    const lang = langTag(line.lang);
+    if (this.voice) return lang ? this.voice.speak(text, id, { lang }) : this.voice.speak(text, id);
     const s = synth();
     if (!s) return;
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = readingLang(this.voicePrefer, () => pickLang(text));
+    u.lang = lang ?? readingLang(this.voicePrefer, () => pickLang(text));
     u.rate = this.speechRate;
     const voice = voicePicker.pick(u.lang, this.voicePrefer);
     if (voice) u.voice = voice;
@@ -1504,7 +1518,7 @@ export class ChatBox extends Base {
   /** Files alone, no draft: they go out after the debounce, as a typed line would. */
   private armFiles() {
     this.disarm();
-    if (this._micActive || this._partial || this.composing) return;
+    if (this._micActive || this._partial || this._hold || this.composing) return;
     const bar = document.createElement("div");
     bar.className = "drain";
     bar.setAttribute("aria-hidden", "true");

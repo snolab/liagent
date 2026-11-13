@@ -1,0 +1,174 @@
+<!doctype html>
+<!--
+  liagent headless: a chat UI built from scratch on liagent/core, with no
+  <liagent-chat>. Run `bun run dev` and open /liagent/examples/headless/ (a
+  fake agent), or /liagent/examples/headless/?hub (the dev hub).
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>liagent: headless</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+        background: Canvas;
+        color: CanvasText;
+      }
+      #chat {
+        max-width: 32rem;
+        border: 1px solid color-mix(in oklch, CanvasText 20%, transparent);
+        border-radius: 12px;
+        padding: 12px;
+      }
+      #log {
+        list-style: none;
+        margin: 0 0 8px;
+        padding: 0;
+        max-height: 50vh;
+        overflow: auto;
+      }
+      #log li {
+        margin: 4px 0;
+      }
+      #log .agent {
+        color: oklch(0.6 0.15 250);
+      }
+      #log .sending {
+        opacity: 0.5;
+      }
+      #log .failed {
+        color: oklch(0.6 0.2 25);
+      }
+      #status {
+        font-size: 12px;
+        opacity: 0.7;
+      }
+      #ask[hidden],
+      #busy[hidden] {
+        display: none;
+      }
+      textarea {
+        box-sizing: border-box;
+        width: 100%;
+        font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>liagent: headless</h1>
+    <p>The same chat as the box, drawn by the page itself from <code>liagent/core</code>.</p>
+    <div id="chat">
+      <div id="status" aria-live="polite"></div>
+      <div id="ask" role="alertdialog" hidden>
+        <span id="ask-text"></span>
+        <button id="allow">Allow</button>
+        <button id="deny">Deny</button>
+      </div>
+      <ul id="log" aria-live="polite"></ul>
+      <div id="busy" hidden>The agent is working…</div>
+      <textarea id="input" rows="2" placeholder="Message the agent…"></textarea>
+    </div>
+
+    <script type="module">
+      const { createChat, createDraft, bindDraft, hubTransport } = await import("../../liagent.js");
+
+      // 1. The transport: the hub's page socket, or a fake agent in the page.
+      const fake = () => {
+        let sink;
+        let n = 0;
+        return {
+          start(s) {
+            sink = s;
+            sink.status("live");
+            sink.receive({
+              type: "state",
+              pending: null,
+              sessions: [],
+              listeners: 1,
+              pages: [],
+              self: "",
+            });
+          },
+          send(msg) {
+            if (msg.type !== "chat") return true;
+            const at = Date.now();
+            sink.receive({
+              type: "chat",
+              message: { id: msg.id, from: "owner", label: "", text: msg.text, at },
+            });
+            sink.receive({ type: "busy" });
+            const id = `a${++n}`;
+            setTimeout(
+              () =>
+                sink.receive({
+                  type: "chat",
+                  message: {
+                    id,
+                    from: "agent",
+                    label: "",
+                    text: `You said: ${msg.text}`,
+                    at: Date.now(),
+                  },
+                }),
+              1000,
+            );
+            return true;
+          },
+          stop() {
+            sink.status("offline");
+          },
+        };
+      };
+      const transport = location.search.includes("hub")
+        ? hubTransport({ url: "../../api/chat" })
+        : fake();
+      const chat = createChat({ transport });
+
+      // 2. Draw the state. Text only: never innerHTML for anything a message holds.
+      const $ = (id) => document.getElementById(id);
+      const render = (s) => {
+        $("status").textContent =
+          s.status === "live" ? `connected · ${s.listeners} agent(s) listening` : s.status;
+        $("busy").hidden = !s.busy;
+        $("ask").hidden = !s.pending;
+        if (s.pending)
+          $("ask-text").textContent = `${s.pending.label} asks to connect: code ${s.pending.code}`;
+        const shown = new Set(s.messages.map((m) => m.id));
+        const lines = [
+          ...s.messages.map((m) => ({ id: m.id, text: m.text, cls: m.from })),
+          ...s.outbox
+            .filter((o) => !shown.has(o.id))
+            .map((o) => ({ id: o.id, text: o.text, cls: o.status })),
+        ];
+        $("log").replaceChildren(
+          ...lines.map((l) => {
+            const li = document.createElement("li");
+            li.className = l.cls;
+            li.textContent = l.text;
+            return li;
+          }),
+        );
+      };
+      chat.subscribe(render);
+      render(chat.getState());
+
+      // 3. Actions. allow() works only from a tap like this one.
+      $("allow").onclick = () => chat.allow(chat.getState().pending.pair, { pages: "all" });
+      $("deny").onclick = () => chat.deny(chat.getState().pending.pair);
+
+      // 4. The input: debounce, Enter, IME and dictation rules, as in the box.
+      bindDraft($("input"), createDraft({ send: (text) => chat.send(text) }));
+
+      // Read-aloud is opt-in: connectVoice(chat, voice()) from liagent/voice.
+      chat.start();
+    </script>
+  </body>
+</html>
