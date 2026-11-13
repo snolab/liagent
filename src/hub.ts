@@ -1034,6 +1034,7 @@ export class ChatHub {
         ...(m.source ? { source: m.source } : {}),
         ...(m.context ? { context: m.context } : {}),
         ...(m.attachments ? { attachments: m.attachments } : {}),
+        ...(m.ctx ? { ctx: m.ctx } : {}),
       });
     }
     if (m.type === "page") return this.relabel(ws, page, m.label);

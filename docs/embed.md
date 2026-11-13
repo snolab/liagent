@@ -379,6 +379,28 @@ effect.
 **Events:** `liagent-silent`, `detail: { id, why }`, when a live line is
 kept silent (`why`: `"hidden"` or `"quiet"`).
 
+`beforesend` (cancelable, does not bubble) fires on the box just before
+`onSend`, with `detail: { text, to, source, context, attachments, extra }`.
+Add your own fields to `detail.extra` (add to it, never replace it, so
+several listeners compose); they go out as the line's `ctx`, a plain JSON
+object of at most `MAX_CTX` (4000) characters as JSON (`cleanCtx` drops
+anything else, and an empty `extra` sends no `ctx`). `preventDefault()`
+keeps the draft unsent.
+
+```js
+box.addEventListener("beforesend", (e) => {
+  Object.assign(e.detail.extra, { page: location.pathname, plan: "pro" });
+  if (e.detail.text.length > 2000) e.preventDefault();
+});
+```
+
+With your own transport, `onSend` gets it as `opts.ctx`; `connectHub` and
+`chat.send(text, { ctx })` send it, and the hub keeps it on the line.
+`liagent listen --to` delivers it to the agent after the text (and after
+the selection and the files) as one line of JSON,
+`[page ctx (set by the page's script, not by the user): {"recordId":"42"}]`,
+in the spilled file too when the message is long.
+
 - `submit() → boolean`: sends the draft now, as Enter would; true if it went
   out.
 - `draft`, `setDraft(text, { source? })`, `setPartial(text | null)`: the draft,
@@ -768,6 +790,10 @@ hosts that read aloud some other way. An older version kept a per-device
   `routeChat(req, env.CHAT, { identify, allowedOrigins: ["https://app.example.com"] })`.
   Prefer `SameSite=Lax` or `Strict` session cookies too.
 
+- **`ctx` is page-supplied.** Any script on the page (or the user, in the
+  devtools) can set a line's `ctx`, so an agent should read it as hints
+  about where the user is, never as proof of who they are or what they may
+  do. The hub only checks its shape and size.
 - **The page side is your site's call.** The hub accepts only pages that
   your `identify(req)` vouches for. An agent can do nothing until the user
   approves it in the box, on the pages they choose, after matching the

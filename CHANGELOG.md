@@ -4,6 +4,16 @@
 
 ### Added
 
+- **`beforesend` on the box.** A cancelable `beforesend` event fires just
+  before `onSend` with `{ text, to, source, context, attachments, extra }`.
+  Listeners add fields to `detail.extra` (several compose); they go out as
+  the chat line's `ctx`, a plain JSON object of at most `MAX_CTX` (4000)
+  characters, checked by `cleanCtx` and kept by `parsePageMessage` and the
+  hub. `preventDefault()` keeps the draft unsent. `chat.send()` takes
+  `ctx` too. `liagent listen --to` delivers it after the text as
+  `[page ctx (set by the page's script, not by the user): {…}]`, in the
+  spilled file too. No listener: the same message as before.
+
 - **Links in messages.** http(s) URLs in a line's text (also polished/raw
   text) become links, built as DOM nodes (`linkify`, `src/linkify.ts`).
   Other origins open in a new tab with `rel="noopener noreferrer"`; the
