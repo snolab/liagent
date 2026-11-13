@@ -14,6 +14,9 @@ position, so it fits any page and any framework. This guide covers:
 8. [Voice input](#8-voice-input): `<liagent-mic>`, your STT endpoint, Silero VAD
 9. [Hands-free voice](#9-hands-free-voice): replies read aloud, barge-in, your TTS endpoint
 
+To build your own chat UI instead of using this box, see
+[headless.md](headless.md) (`liagent/core`, `liagent/react`).
+
 ## 1. Loading it
 
 The module defines nothing until you call `defineChatBox()`, and it is safe
@@ -354,7 +357,8 @@ effect.
 | `treeRepo`      | `string`                                          | `owner/repo` that a bare `#123` in the tree links to.                                                                                                                                                                                                   |
 | `treeStrings`   | `Partial<TreeStrings>`                            | The tree's strings (English; Chinese on a `zh` page).                                                                                                                                                                                                   |
 | `strings`       | `Partial<UiStrings>`                              | The box's own strings (English; Chinese on a `zh` page, under yours).                                                                                                                                                                                   |
-| `micActive`     | `boolean`                                         | A mic is on: treated as focus (the log opens, the box is opaque), and the debounce never sends by itself. Attribute: `mic-active`.                                                                                                                      |
+| `micActive`     | `boolean`                                         | A mic is on: treated as focus (the log opens, the box is opaque), and neither the debounce nor a sentence jump sends by itself. Attribute: `mic-active`.                                                                                                |
+| `hold`          | `boolean`                                         | Keeps the draft without the mic look: no debounce or sentence-jump sends. Enter and `submit()` still send. Attribute: `hold`.                                                                                                                           |
 | `voice`         | `ChatVoice`                                       | `{ speak(text, id?), stop(why?) }`: reads replies aloud instead of `speechSynthesis`. See [Voice input and output](#voice-input-and-output).                                                                                                            |
 | `actions`       | `ChatAction[]`                                    | The + menu's items and the bar's own buttons, each placed by `place` (`"menu"`, `"leading"`, `"trailing"`). See [The + menu](#the--menu).                                                                                                               |
 | `micPlacement`  | `"trailing" \| "leading" \| "inside" \| "hidden"` | Where the slotted mic goes: the bar's end (default), its start (after the mark), inside the input's cell (it folds away with the input when minimized), or not shown. Attribute: `mic-placement`.                                                       |
@@ -427,7 +431,12 @@ name from a visually hidden span instead.
 - `agent-avatar`, `user-avatar`, `user-name`: the same as the properties
   (read once, when attached).
 - `mic-active`: the same as `micActive` (watched).
+- `hold`: the same as `hold` (watched).
 - `mic-placement`, `tree-placement`: the same as the properties (watched).
+- `all-pages` (property `allPages`, watched): your hub widens code grants to
+  every page of the user. A code request then says "on all your pages,
+  including pages opened later", Allow sends `pages: "all"`, and no page
+  ticks are shown.
 
 **Theming** (CSS custom properties on the element):
 
@@ -667,19 +676,20 @@ hands-free voice goes on.
 
 What the mic uses on the box (`box` is its parent element):
 
-| Member                                  | Meaning                                                                                                                                                      |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `box.micActive = true` / `mic-active`   | The mic is on: treated as focus (the log opens to 30vh, the box is opaque), every reply is read aloud, and the debounce never sends by itself.               |
-| `box.setPartial(text \| null)`          | A live transcript, shown dimmed after the draft; never committed. `null` clears it. While one shows, the debounce waits.                                     |
-| `box.draft`                             | The draft as it is now (what the user typed, or earlier dictation).                                                                                          |
-| `box.setDraft(text, { source: "stt" })` | Sets the draft (the whole input) as dictation. Sent unchanged, the line goes out with `source: "stt"`; anything typed into it first makes it the user's own. |
-| `box.submit() → boolean`                | Sends the draft as Enter would; true if it went out.                                                                                                         |
+| Member                                  | Meaning                                                                                                                                                              |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `box.micActive = true` / `mic-active`   | The mic is on: treated as focus (the log opens to 30vh, the box is opaque), every reply is read aloud, and neither the debounce nor a sentence jump sends by itself. |
+| `box.setPartial(text \| null)`          | A live transcript, shown dimmed after the draft; never committed. `null` clears it. While one shows, automatic sends wait.                                           |
+| `box.draft`                             | The draft as it is now (what the user typed, or earlier dictation).                                                                                                  |
+| `box.setDraft(text, { source: "stt" })` | Sets the draft (the whole input) as dictation. Sent unchanged, the line goes out with `source: "stt"`; anything typed into it first makes it the user's own.         |
+| `box.submit() → boolean`                | Sends the draft as Enter would; true if it went out.                                                                                                                 |
 
 So a final transcript is usually `box.setDraft(joined(box.draft, text), { source: "stt" })`,
 then `box.submit()` when it ends a sentence.
 
-For voice output, set `box.voice = { speak(text, id?), stop(why?) }`. The box
-then calls `voice.speak(reply.text, reply.id)` for each reply that arrives
+For voice output, set `box.voice = { speak(text, id?, opts?), stop(why?) }`. The box
+then calls `voice.speak(reply.text, reply.id)` (with a third argument
+`{ lang }` when the reply has its own `lang`, below) for each reply that arrives
 live (when read-aloud is on, or a mic is on) instead of using
 `speechSynthesis`, and `voice.stop("typing")` when the user types (`"off"`
 when read-aloud is turned off). `box.speechRate` is the menu's speed for it to
@@ -708,6 +718,21 @@ history. History is never read aloud either way. With your own transport,
 pass the message to `box.push(m)` and the box reads its `quiet`;
 `box.speak(text, id, m)` does the same.
 
+### A line's language
+
+The box reads a line in its own `lang`, a BCP-47 tag such as `"fr-FR"` or
+`"de"`, when it has one (`liagent say --lang fr-FR …`, or
+`{type:"say", text, lang?}` on the wire). Otherwise the language is
+`voicePrefer.lang` (or `voice({ lang })`), else a guess from the script,
+which tells only Japanese, Korean and Chinese from English, so a French or
+German reply needs `lang` to get a voice of its own. The hub keeps `lang`
+only when it looks like a language tag (`langTag`: letters, then letter or
+digit subtags, at most 35 characters) and copies it onto the `ChatMessage`.
+With your own transport, set `lang` on the message you pass to
+`box.push(m)`. With `box.voice` set, the box passes it on as
+`voice.speak(text, id, { lang })`; `liagent/voice` reads every sentence of
+that reply in it.
+
 The rules are pure functions in `liagent/ui` (`silenceFor`, `isQuiet`) for
 hosts that read aloud some other way. An older version kept a per-device
 `<storage-key>:quiet-hours` setting; the box removes it when it attaches.
@@ -729,6 +754,17 @@ hosts that read aloud some other way. An older version kept a per-device
 - **Eval is off by default** on both ends: the hub needs `chatHub({ eval: true })`,
   and `connectHub` needs `evalCode: true`. With both on, an approved agent
   runs arbitrary code in the pages the user allowed. Keep it to debug sessions.
+- **Preapproved eval** (`chatHub({ eval: true, preapprovedEval: true })`, off
+  by default): the host calls `hub.preapprove(token, { label, ms?, pages? })`
+  from its own Durable Object code, and an agent knocking with that token
+  (`x-liagent-token`) resumes the owner's eval grant with no pairing code and
+  no 8-hour re-approval. liagent cannot tell who holds a token: call it only
+  for an agent you authenticated yourself (a key of at least 32 characters,
+  never from a page), for your own signed-in owner. The grant lasts `ms`
+  (8 hours by default, 30 days at most); call it again to extend it. The
+  user's End still revokes it and it stays ended until you pass `force: true`;
+  `hub.unapprove(token)` ends it from the host (for example on a key change), or
+  `hub.unapproveHash(hashToken(token))` if you keep only the hash.
 - **CSP:** a hosted `liagent.js` needs its origin in `script-src`, and the
   hub's socket needs it in `connect-src`. The box styles its shadow root with
   a constructed stylesheet (`adoptedStyleSheets`), which `style-src` does not
@@ -985,8 +1021,10 @@ How it reads:
   (so `3.14` stays whole), after `。．！？` with closing brackets, and at
   newlines. A sentence over 200 characters is cut at a clause mark, else at
   a space. A new reply waits behind the one being read and never cuts it off.
-- **The voice.** The language comes from the script (kana → ja-JP, Hangul
-  → ko-KR, other Han → zh-CN, else en-US), unless `lang` is set. Among the
+- **The voice.** The language is the reply's own `lang` when the box passes
+  one ([A line's language](#a-lines-language)); else it comes from the
+  script (kana → ja-JP, Hangul → ko-KR, other Han → zh-CN, else en-US),
+  unless `lang` is set. Among the
   installed voices it prefers Premium, then Enhanced or Siri, then the
   regular named voice, and never iOS's Eloquence or novelty voices
   (`voiceQuality`, `pickNaturalVoice`). `prefer` names voices to try

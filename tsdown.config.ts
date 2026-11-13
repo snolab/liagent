@@ -11,6 +11,8 @@ export default defineConfig({
     ui: "./src/ui.ts",
     mic: "./src/mic-button.ts",
     voice: "./src/voice.ts",
+    core: "./src/headless.ts",
+    react: "./src/react.ts",
     client: "./src/client.ts",
     hub: "./src/hub.ts",
     protocol: "./src/protocol.ts",
@@ -23,6 +25,6 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   clean: false,
-  external: [/^node:/, "bun"],
+  external: [/^node:/, "bun", "react"],
   outExtensions: () => ({ js: ".js", dts: ".d.ts" }),
 });

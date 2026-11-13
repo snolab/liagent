@@ -64,7 +64,7 @@ describe("sentences", () => {
 });
 
 /** speechSynthesis in memory: one utterance at a time is all the session ever gives it. */
-function harness(o: { enabled?: boolean; here?: boolean } = {}) {
+function harness(o: { enabled?: boolean; here?: boolean; lang?: string } = {}) {
   const spoken: (UtterLike & { lang: string })[] = [];
   let cancels = 0;
   const flags = { enabled: o.enabled ?? true, here: o.here ?? false, synth: true };
@@ -81,6 +81,7 @@ function harness(o: { enabled?: boolean; here?: boolean } = {}) {
       ({ text, lang, onend: null, onerror: null, onboundary: null }) as UtterLike,
     enabled: () => flags.enabled,
     here: () => flags.here,
+    lang: () => o.lang,
     setTimer: (f, ms) => {
       const t = { f, ms, live: true };
       timers.push(t);
@@ -169,6 +170,28 @@ describe("voice session: the queue", () => {
     h.v.reply("A. B.");
     h.spoken.at(-1)?.onerror?.();
     expect(h.texts().at(-1)).toBe("B.");
+  });
+
+  it("a message's own lang reads each of its sentences, ahead of the script and a forced lang", () => {
+    const h = harness();
+    h.v.setMic(true);
+    // The script alone would say en-US for French.
+    h.v.speak("Bonjour. Ça va ?", "m1", { lang: "fr-FR" });
+    h.v.speak("Guten Tag.", "m2"); // no lang: from the script
+    h.end();
+    h.end();
+    expect(h.spoken.map((u) => [u.text, u.lang])).toEqual([
+      ["Bonjour.", "fr-FR"],
+      ["Ça va ?", "fr-FR"],
+      ["Guten Tag.", "en-US"],
+    ]);
+    // Over a forced lang too; a malformed tag is ignored.
+    const f = harness({ lang: "ja-JP" });
+    f.v.setMic(true);
+    f.v.reply("Hallo.", "de");
+    f.end();
+    f.v.reply("Hola.", "not a tag");
+    expect(f.spoken.map((u) => u.lang)).toEqual(["de", "ja-JP"]);
   });
 
   it("stop() clears the queue (Stop reading)", () => {

@@ -121,6 +121,12 @@ export type ChatMessage = {
   raw?: string;
   /** An agent line never read aloud (`say --quiet`: FYI, progress). Only ever `true`. */
   quiet?: true;
+  /**
+   * The line's language, a BCP-47 tag ("fr-FR", "de"): read aloud in it,
+   * ahead of any preferred language and the guess from the script, which
+   * tells only ja/ko/zh from en (`say --lang`; langTag checks it).
+   */
+  lang?: string;
   /** Set when the agent polished the line: when, by which agent, and how many times. */
   edited?: EditMark;
   /** What the user attached to the line (the box's + menu): checked by cleanContext. */
@@ -221,6 +227,8 @@ export type ControllerMessage =
       agentId?: string;
       /** Never read aloud. Kept only as boolean true. */
       quiet?: true;
+      /** The line's language (BCP-47); dropped unless langTag takes it. */
+      lang?: string;
     }
   | { type: "busy"; to?: string; on?: boolean }
   /** Polish the owner's latest line, when it came from the box's mic (`source: "stt"`). */
@@ -302,6 +310,8 @@ export function parseControllerMessage(
     if (agentId) value.agentId = agentId;
     // Only boolean true counts. An old `loud` is dropped: it means nothing now.
     if (m.quiet === true) value.quiet = true;
+    const lang = langTag(m.lang);
+    if (lang) value.lang = lang;
     return { ok: true, value };
   }
   if (m?.type === "edit") {
@@ -405,6 +415,20 @@ export function parsePageMessage(raw: unknown): PageMessage | null {
 /** The newest `max` messages, oldest first. */
 export function trimHistory(list: ChatMessage[], max = CHAT_HISTORY): ChatMessage[] {
   return list.length > max ? list.slice(list.length - max) : list;
+}
+
+/** The longest language tag kept (BCP-47's own practical limit). */
+export const MAX_LANG = 35;
+
+/**
+ * A message's `lang`, if it is shaped like a BCP-47 tag ("fr", "fr-FR",
+ * "zh-Hant-TW", "es-419"): a 2–8 letter language, then 1–8 letter or digit
+ * subtags. Anything else (not a string, empty, too long, spaces) is undefined.
+ */
+export function langTag(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const t = v.trim();
+  return t.length <= MAX_LANG && /^[a-z]{2,8}(-[a-z0-9]{1,8})*$/i.test(t) ? t : undefined;
 }
 
 /**

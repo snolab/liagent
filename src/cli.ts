@@ -22,10 +22,12 @@ const USAGE = `liagent — the agent's side of the user ⇄ agent chat (src/hub.
       the saved grant and reconnects on network drops (backing off from 1 s
       to a minute) without ever asking the user again; see "Pairing".
 
-  liagent say    [hub] "text" | -   [--to <email|user id>] [--quiet]
+  liagent say    [hub] "text" | -   [--to <email|user id>] [--quiet] [--lang <tag>]
       Reply in the box (the user's thread, or a friend's), then exit.
       --quiet: shown, never read aloud (FYI, progress, notices: anything
       the user did not ask for). A hidden page never reads aloud.
+      --lang: the line's language, a BCP-47 tag (fr-FR, de): it is read
+      aloud in that language (else it is guessed from the script).
       --loud is deprecated: accepted and ignored (a plain say).
 
   liagent say    [hub] "text" --to /words/audio
@@ -350,6 +352,17 @@ function request(ws: WebSocket, msg: unknown, type: string, ms = RESULT_MS): Pro
 }
 
 async function readText(): Promise<string> {
+  // A flag left after the command took its own is a mistake, never text to post:
+  // --help/-h prints usage; any other flag-like word is refused. "--" ends flags.
+  const end = args.indexOf("--");
+  const head = end === -1 ? args : args.slice(0, end);
+  if (head.some((a) => a === "--help" || a === "-h")) usage();
+  const bad = head.find((a) => /^--?[A-Za-z]/.test(a));
+  if (bad) {
+    console.error(`liagent: unknown flag ${bad} for ${cmd} (put text after "--" to send it as is)`);
+    usage(2);
+  }
+  if (end !== -1) args.splice(end, 1);
   const rest = args.join(" ");
   if (rest !== "-") return rest;
   return (await new Response(Bun.stdin.stream()).text()).trim();
@@ -494,6 +507,7 @@ async function main() {
   }
   if (cmd === "listen") return cmdListen(hub);
   if (cmd === "edit") {
+    if (args.includes("--help") || args.includes("-h")) usage();
     const last = args.includes("--last");
     if (last) args.splice(args.indexOf("--last"), 1);
     const id = last ? undefined : args.shift();
@@ -523,6 +537,7 @@ async function main() {
   if (cmd === "say") {
     const to = flag("--to");
     const quiet = takeSwitch("--quiet");
+    const lang = flag("--lang");
     // Deprecated: it does nothing now; accepted so old commands still work.
     if (takeSwitch("--loud"))
       console.error("liagent: say --loud is deprecated and does nothing (a plain say)");
@@ -538,6 +553,7 @@ async function main() {
         ...(place.node ? { taskPath: place.node } : {}),
         ...(place.agent ? { agentId: place.agent } : {}),
         ...(quiet ? { quiet: true } : {}),
+        ...(lang ? { lang } : {}),
       },
       "said",
     );
