@@ -13,6 +13,8 @@ describe("which lines are read aloud", () => {
 
   it("any other line is read, at any time of day", () => {
     expect(silenceFor({}, { hidden: false })).toBeNull();
+    // A line's lang picks the reading language; it never silences a line.
+    expect(silenceFor({ lang: "fr-FR" }, { hidden: false })).toBeNull();
     // An old `loud` means nothing.
     expect(silenceFor({ loud: true } as object, { hidden: false })).toBeNull();
   });

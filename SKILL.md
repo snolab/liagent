@@ -141,6 +141,10 @@ Default to `--quiet` whenever the line is not a reply. A page in the
 background never speaks. `--loud` is deprecated: it is accepted and does
 nothing.
 
+Reading in the right voice: the box guesses the language from the script
+alone (Japanese, Korean, Chinese, else English). When you reply in another
+language, say which: `liagent say --lang fr-FR "Bonjour."` (any BCP-47 tag).
+
 ## Agent edits of voice messages
 
 STT gets words wrong, and it has no context on the conversation; you do. A
@@ -472,6 +476,13 @@ Framework notes (details and a runnable page for each in docs/embed.md):
 
 Mount it only where it is wanted (for example the site owner's pages, or a
 debug mode), and keep `evalCode` off unless step 3 enables eval.
+
+**Your own UI (headless).** If the project wants a chat UI in its own
+style instead of the box, build it on `liagent/core` (`createChat`,
+`hubTransport`, `createDraft`) or `liagent/react` (`useHubChat`,
+`useChatState`, `useDraft`); see docs/headless.md. Keep the rules: render
+message text as text only, call `allow()` only from the user's tap, and
+show a pairing's label and code.
 
 **Voice input (optional).** Put `<liagent-mic slot="mic" stt-url="/api/stt">`
 inside the box (`defineMic()` from `liagent/mic`). The user then dictates,
