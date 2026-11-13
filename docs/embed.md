@@ -356,8 +356,9 @@ effect.
 | `treeSource`    | `TreeSource`                                      | The state tree: a URL serving its markdown, a function returning markdown or nodes, or a feed `{ subscribe(onUpdate) }`. The tree button shows it; minimized, its frontier sits under the floating lines. Loaded when set and each time the tree opens. |
 | `treeRepo`      | `string`                                          | `owner/repo` that a bare `#123` in the tree links to.                                                                                                                                                                                                   |
 | `treeStrings`   | `Partial<TreeStrings>`                            | The tree's strings (English; Chinese on a `zh` page).                                                                                                                                                                                                   |
-| `strings`       | `Partial<UiStrings>`                              | The box's own strings (English; Chinese on a `zh` page, under yours).                                                                                                                                                                                   |
-| `micActive`     | `boolean`                                         | A mic is on: treated as focus (the log opens, the box is opaque), and the debounce never sends by itself. Attribute: `mic-active`.                                                                                                                      |
+| `strings`       | `Partial<UiStrings>`                              | The box's own strings, all of its text: status, requests, menu, hints (`UI_EN` lists the keys; English, Chinese on a `zh` page, under yours).                                                                                                           |
+| `micActive`     | `boolean`                                         | A mic is on: treated as focus (the log opens, the box is opaque), and neither the debounce nor a sentence jump sends by itself. Attribute: `mic-active`.                                                                                                |
+| `hold`          | `boolean`                                         | Keeps the draft without the mic look: no debounce or sentence-jump sends. Enter and `submit()` still send. Attribute: `hold`.                                                                                                                           |
 | `voice`         | `ChatVoice`                                       | `{ speak(text, id?), stop(why?) }`: reads replies aloud instead of `speechSynthesis`. See [Voice input and output](#voice-input-and-output).                                                                                                            |
 | `actions`       | `ChatAction[]`                                    | The + menu's items and the bar's own buttons, each placed by `place` (`"menu"`, `"leading"`, `"trailing"`). See [The + menu](#the--menu).                                                                                                               |
 | `micPlacement`  | `"trailing" \| "leading" \| "inside" \| "hidden"` | Where the slotted mic goes: the bar's end (default), its start (after the mark), inside the input's cell (it folds away with the input when minimized), or not shown. Attribute: `mic-placement`.                                                       |
@@ -430,7 +431,19 @@ name from a visually hidden span instead.
 - `agent-avatar`, `user-avatar`, `user-name`: the same as the properties
   (read once, when attached).
 - `mic-active`: the same as `micActive` (watched).
+- `hold`: the same as `hold` (watched).
 - `mic-placement`, `tree-placement`: the same as the properties (watched).
+- `no-echo-toggle` (property `echoToggle = false`, watched): hides the menu's
+  echo-cancellation row, for a host that decides the mic's processing itself.
+- `keep-scroll`: the box keeps where the log is scrolled (under its
+  `storage-key`, in localStorage) and goes back there after a reload, or to
+  the newest line if that line is gone. Without it, the log opens at its
+  newest line. For your own storage use `box.scrollState` instead: read it
+  (or listen for the `scroll-state` event, detail: the state, after the
+  user's own scrolling), and set it after a reload. The state is `null` at
+  the newest line, else `{ id, dy }`: the message id of the top line and
+  how many px of it are scrolled past, so new lines do not move it. A set
+  waits until that line is rendered and the log is shown.
 - `all-pages` (property `allPages`, watched): your hub widens code grants to
   every page of the user. A code request then says "on all your pages,
   including pages opened later", Allow sends `pages: "all"`, and no page
@@ -438,24 +451,34 @@ name from a visually hidden span instead.
 
 **Theming** (CSS custom properties on the element):
 
-| Variable               | Default                                           | Used for                                                                       |
-| ---------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `--liagent-bg`         | `Canvas`                                          | The halo behind the text, and the glass bar (55%). Set it to your page colour. |
-| `--liagent-fg`         | `CanvasText`                                      | Text                                                                           |
-| `--liagent-agent`      | `oklch(0.55 0.14 150)`                            | The spinner                                                                    |
-| `--liagent-avatar`     | `18px`                                            | Avatar size                                                                    |
-| `--liagent-z`          | `40`                                              | z-index                                                                        |
-| `--liagent-width`      | `min(20rem, 100vw - 1rem)`                        | Box width                                                                      |
-| `--liagent-control`    | `2.125rem`                                        | One line of the bar: the input's and the buttons' height, the mic's size       |
-| `--liagent-bar-border` | `1px`                                             | The bar's border                                                               |
-| `--liagent-bar-pad`    | `2px` (minimized: `--liagent-bar-pad-min`, `1px`) | The bar's padding                                                              |
-| `--liagent-menu-bg`    | 92% of `--liagent-bg`                             | The + menu's fill                                                              |
-| `--liagent-accent`     | `oklch(0.55 0.12 250)`                            | The + menu's badges, the quote line                                            |
+| Variable                 | Default                                           | Used for                                                                                                                     |
+| ------------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `--liagent-bg`           | `Canvas`                                          | The halo behind the text, and the glass bar (55%). Set it to your page colour.                                               |
+| `--liagent-fg`           | `CanvasText`                                      | Text                                                                                                                         |
+| `--liagent-agent`        | `oklch(0.55 0.14 150)`                            | The spinner                                                                                                                  |
+| `--liagent-avatar`       | `18px`                                            | Avatar size                                                                                                                  |
+| `--liagent-z`            | `40`                                              | z-index                                                                                                                      |
+| `--liagent-width`        | `min(20rem, 100vw - 1rem)`                        | Box width                                                                                                                    |
+| `--liagent-log-max`      | `4.4rem`                                          | The log's height at rest (and the minimized tree's). Set it to fill your host: px or vh (a % has nothing to resolve against) |
+| `--liagent-log-max-wide` | `30vh`                                            | The log's height while typing, with a mic on, or with the tree open                                                          |
+| `--liagent-control`      | `2.125rem`                                        | One line of the bar: the input's and the buttons' height, the mic's size                                                     |
+| `--liagent-bar-border`   | `1px`                                             | The bar's border                                                                                                             |
+| `--liagent-bar-pad`      | `2px` (minimized: `--liagent-bar-pad-min`, `1px`) | The bar's padding                                                                                                            |
+| `--liagent-menu-bg`      | 92% of `--liagent-bg`                             | The + menu's fill                                                                                                            |
+| `--liagent-accent`       | `oklch(0.55 0.12 250)`                            | The + menu's badges, the quote line                                                                                          |
 
-The bar's corner radius is not a variable: it is
+The bar's corner radius defaults to
 `--liagent-bar-border + --liagent-bar-pad + --liagent-control / 2`, so a
 round control one line high in a corner (the mic) is concentric with it at
-any size. The mic takes `--liagent-mic-fg`, `--liagent-mic-bg`,
+any size. To square or round the top and bottom corners separately (say, to
+join the bar to a panel above it), set `--liagent-bar-radius-top` and
+`--liagent-bar-radius-bottom`; anything else on the bar can be styled with
+`liagent-box::part(bar)`.
+
+**Host state:** the element reflects its layout as a boolean attribute,
+`[open]` while it is open and `[min]` while it is minimized, so page CSS can
+style around it (`liagent-box[min] + .hint { display: none }`). These are
+output only: setting them does not open or minimize the box. The mic takes `--liagent-mic-fg`, `--liagent-mic-bg`,
 `--liagent-mic-icon`, `--liagent-mic-rec` and `--liagent-mic-talk`.
 
 **Layout:** one glass bar, `[mark | leading … | tree | + | input … | trailing … | mic]`
@@ -674,13 +697,13 @@ hands-free voice goes on.
 
 What the mic uses on the box (`box` is its parent element):
 
-| Member                                  | Meaning                                                                                                                                                      |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `box.micActive = true` / `mic-active`   | The mic is on: treated as focus (the log opens to 30vh, the box is opaque), every reply is read aloud, and the debounce never sends by itself.               |
-| `box.setPartial(text \| null)`          | A live transcript, shown dimmed after the draft; never committed. `null` clears it. While one shows, the debounce waits.                                     |
-| `box.draft`                             | The draft as it is now (what the user typed, or earlier dictation).                                                                                          |
-| `box.setDraft(text, { source: "stt" })` | Sets the draft (the whole input) as dictation. Sent unchanged, the line goes out with `source: "stt"`; anything typed into it first makes it the user's own. |
-| `box.submit() → boolean`                | Sends the draft as Enter would; true if it went out.                                                                                                         |
+| Member                                  | Meaning                                                                                                                                                              |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `box.micActive = true` / `mic-active`   | The mic is on: treated as focus (the log opens to 30vh, the box is opaque), every reply is read aloud, and neither the debounce nor a sentence jump sends by itself. |
+| `box.setPartial(text \| null)`          | A live transcript, shown dimmed after the draft; never committed. `null` clears it. While one shows, automatic sends wait.                                           |
+| `box.draft`                             | The draft as it is now (what the user typed, or earlier dictation).                                                                                                  |
+| `box.setDraft(text, { source: "stt" })` | Sets the draft (the whole input) as dictation. Sent unchanged, the line goes out with `source: "stt"`; anything typed into it first makes it the user's own.         |
+| `box.submit() → boolean`                | Sends the draft as Enter would; true if it went out.                                                                                                                 |
 
 So a final transcript is usually `box.setDraft(joined(box.draft, text), { source: "stt" })`,
 then `box.submit()` when it ends a sentence.
@@ -950,20 +973,21 @@ are exported for that.
 
 ### Reference
 
-| Attribute / property             | Meaning                                                                                       |
-| -------------------------------- | --------------------------------------------------------------------------------------------- |
-| `stt-url` / `sttUrl`             | The STT endpoint (above).                                                                     |
-| `lang` / `lang`                  | The language hint (`?lang=`).                                                                 |
-| `.stt`                           | `(wav, info) => Promise<string \| { text }>`, used instead of `stt-url`.                      |
-| `.sttHeaders`, `.sttCredentials` | For the default request.                                                                      |
-| `vad-src`, `ort-src` / `.vad`    | Silero's source (above). None: the energy gate.                                               |
-| `aec`                            | `off`: no echo-cancelled barge-in; capture is held while the agent speaks (with a voice).     |
-| `tick`                           | A soft two-tone tick when a spoken sentence is sent (Web Audio; silent on a muted iPhone).    |
-| `storage-key`                    | The sessionStorage key of the reload flag (`liagent:mic`), read when the session is made.     |
-| `.box`                           | The `DictationTarget` (default: the closest `<liagent-chat>`).                                |
-| `.voice`                         | A `MicVoiceLink`: a voice output that reads replies hands-free (ducking, barge-in, the echo). |
-| `.strings`                       | The labels and error notes (`MIC_STRINGS_EN` lists them), e.g. translated.                    |
-| `.session`                       | The page's mic session: `view()`, `toggle()`, `off()`, `subscribe(f)`.                        |
+| Attribute / property             | Meaning                                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `stt-url` / `sttUrl`             | The STT endpoint (above).                                                                              |
+| `lang` / `lang`                  | The language hint (`?lang=`).                                                                          |
+| `.stt`                           | `(wav, info) => Promise<string \| { text }>`, used instead of `stt-url`.                               |
+| `.sttHeaders`, `.sttCredentials` | For the default request.                                                                               |
+| `vad-src`, `ort-src` / `.vad`    | Silero's source (above). None: the energy gate.                                                        |
+| `aec`                            | `off`: no echo-cancelled barge-in; capture is held while the agent speaks (with a voice).              |
+| `tick`                           | A soft two-tone tick when a spoken sentence is sent (Web Audio; silent on a muted iPhone).             |
+| `storage-key`                    | The sessionStorage key of the reload flag (`liagent:mic`), read when the session is made.              |
+| `.box`                           | The `DictationTarget` (default: the closest `<liagent-chat>`).                                         |
+| `.voice`                         | A `MicVoiceLink`: a voice output that reads replies hands-free (ducking, barge-in, the echo).          |
+| `.strings`                       | The labels and error notes (`MIC_STRINGS_EN` lists them), e.g. translated.                             |
+| `.strings.rec`                   | Optional: a visible label under the icon while capturing (e.g. `"録音"`). Default none: the ring only. |
+| `.session`                       | The page's mic session: `view()`, `toggle()`, `off()`, `subscribe(f)`.                                 |
 
 Events (they bubble and cross shadow roots):
 

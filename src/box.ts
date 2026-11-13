@@ -131,7 +131,10 @@
 //     (true if it went out).
 //   - box.micActive = true (or the mic-active attribute) counts as focus: the
 //     log opens and the box goes opaque; while it is on, and while a partial
-//     shows, the debounce never sends by itself.
+//     shows, nothing sends by itself (neither the debounce nor a pasted or
+//     dictated sentence).
+//   - box.hold = true (or the hold attribute) keeps the draft the same way
+//     without the mic look; Enter and box.submit() still send.
 //   - box.voice = { speak(text, id?, { lang? }?), stop(why?) } reads replies
 //     aloud instead of speechSynthesis (the third argument only for a line
 //     with its own `lang`); typing calls voice.stop("typing"). box.speechRate is
@@ -189,9 +192,17 @@ import {
   formatSize,
   isInlineImage,
 } from "./files.ts";
-import { repinEnd, stillAtEnd } from "./log-pin.ts";
+import { atEndAfter, repinEnd } from "./log-pin.ts";
+import { linkify } from "./linkify.ts";
 import { aecOn, applyAec } from "./aec.ts";
-import { DEBOUNCE_MS, afterChange, enterSends, lineBreakSends, partialTail } from "./input.ts";
+import {
+  DEBOUNCE_MS,
+  afterChange,
+  autoSend,
+  enterSends,
+  lineBreakSends,
+  partialTail,
+} from "./input.ts";
 import { TREE_STRINGS_EN, type TreeSource, type TreeStrings, watchTree } from "./tree.ts";
 import { type TreeNode, frontier } from "./state-tree.ts";
 import { type AvatarSrc, type Sender, avatarColors, initialOf, lineAvatar } from "./avatar.ts";
@@ -232,6 +243,9 @@ import { type UiStrings, treeDefaults, uiStrings } from "./ui-strings.ts";
 import { RETIRED_SETTINGS, type SpeakMeta, pageHidden, silenceFor } from "./speak-rules.ts";
 import type { Assignee } from "./state-tree.ts";
 
+/** A scroll this soon after the user's wheel, touch, pointer or key is theirs. */
+const USER_SCROLL_MS = 1000;
+
 export { pageHint, when } from "./format.ts";
 export {
   type AvatarSrc,
@@ -269,6 +283,11 @@ export {
 } from "./files.ts";
 
 export type AnswerType = "allow" | "deny";
+/**
+ * Where the log is scrolled: null at its newest line, else the line at its
+ * top (by message id) and how many px of that line are scrolled past.
+ */
+export type ScrollState = { id: string; dy: number } | null;
 /**
  * What the user chose in a pairing request: the pages to allow (their ids,
  * or "all", including pages that open later), and — for an older agent that
@@ -329,11 +348,6 @@ function safeInsets() {
   return v;
 }
 
-/** In the input while the mark is held. */
-const DRAG_HINT = "drag: move · tap: minimize · double-tap: menu";
-const MARK_HINT = "Tap: minimize or restore · double-tap: menu · drag: move the chat";
-const TREE_HINT =
-  "Tap: show or hide the state tree · drag right: open the focused node deeper · drag left: fold it · arrow keys: move";
 /** The input grows to about five lines, then scrolls inside itself. */
 const INPUT_MAX_PX = 128;
 
@@ -405,25 +419,26 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 }
 /* The one scroller: the tree (when open) on top, the log below. Compact at rest. */
 .column {
-  max-height: 4.4rem; min-height: 3rem; overflow-y: auto; padding: 6px 8px;
+  max-height: var(--liagent-log-max, 4.4rem); min-height: 3rem; overflow-y: auto; padding: 6px 8px;
   scrollbar-width: none; transition: max-height .15s ease-out;
 }
 .column::-webkit-scrollbar { display: none; }
-.column.wide { max-height: 30vh; }
+.column.wide { max-height: var(--liagent-log-max-wide, 30vh); }
 .column.fade { -webkit-mask-image: linear-gradient(to bottom, transparent, black .9rem); mask-image: linear-gradient(to bottom, transparent, black .9rem); }
 .column.wide.fade { -webkit-mask-image: linear-gradient(to bottom, transparent, black 2.5rem); mask-image: linear-gradient(to bottom, transparent, black 2.5rem); }
 .treepanel { pointer-events: none; display: flex; flex-direction: row-reverse; align-items: flex-start; min-width: 0; max-width: 100%; padding-bottom: 4px; animation: appear .18s ease-out; }
 @keyframes appear { from { opacity: 0; } }
 .treepanel .tbody { flex: 1; min-width: 0; }
 .treepanel .x { pointer-events: auto; flex: none; position: relative; padding: 0 6px; font-size: 10px; color: var(--muted); }
-.ftree .tbody { max-height: 4.4rem; overflow-y: auto; scrollbar-width: none; }
-.ftree .tbody.wide { max-height: 30vh; }
+.ftree .tbody { max-height: var(--liagent-log-max, 4.4rem); overflow-y: auto; scrollbar-width: none; }
+.ftree .tbody.wide { max-height: var(--liagent-log-max-wide, 30vh); }
 .ftree .tbody.fade { -webkit-mask-image: linear-gradient(to bottom, transparent, black .9rem); mask-image: linear-gradient(to bottom, transparent, black .9rem); }
 .blink { animation: blink 1.6s ease-in-out infinite; }
 @keyframes blink { 50% { opacity: .35; } }
 .log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .log li { display: flex; align-items: flex-start; gap: 6px; }
 .text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding-top: 1px; }
+.text a { pointer-events: auto; color: inherit; text-decoration: underline; }
 .log .hint { opacity: .6; display: block; }
 .polished { all: unset; pointer-events: auto; cursor: pointer; margin-inline-start: 4px; font-size: .85em; opacity: .55; vertical-align: baseline; }
 .polished[aria-pressed="true"] { opacity: .9; }
@@ -466,7 +481,10 @@ img.av { display: block; object-fit: cover; }
 .min .rowbox { grid-template-columns: 0fr 1fr; }
 .bar {
   pointer-events: auto; position: relative; display: flex; align-items: flex-end;
-  padding: var(--bar-pad); border-radius: var(--bar-r); border: var(--bar-b) solid var(--line); background: var(--glass);
+  padding: var(--bar-pad);
+  /* The host can square or round the top and bottom separately (::part(bar) works too). */
+  border-radius: var(--liagent-bar-radius-top, var(--bar-r)) var(--liagent-bar-radius-top, var(--bar-r)) var(--liagent-bar-radius-bottom, var(--bar-r)) var(--liagent-bar-radius-bottom, var(--bar-r));
+  border: var(--bar-b) solid var(--line); background: var(--glass);
   backdrop-filter: blur(12px) saturate(1.5); -webkit-backdrop-filter: blur(12px) saturate(1.5);
   touch-action: none; text-shadow: none;
   transition: border-color .15s ease-out, background-color .15s ease-out;
@@ -756,7 +774,7 @@ type FloatLife = ReturnType<typeof createFloatLife>;
 /** The chat box element. Plain properties in, callbacks out; see the file header. */
 export class ChatBox extends Base {
   static get observedAttributes() {
-    return ["mic-active", "mic-placement", "tree-placement", "all-pages"];
+    return ["mic-active", "hold", "mic-placement", "tree-placement", "all-pages", "no-echo-toggle"];
   }
   /**
    * Called with each draft that goes out, and the state-tree node it is
@@ -860,6 +878,9 @@ export class ChatBox extends Base {
   private fileList: { data?: FilesListing; failed?: boolean; asking?: string } = {};
   /** The log's re-pin scrolled it (its own scroll event is not the user's). */
   private ownPin = false;
+  /** A scroll position to restore once its line is rendered and laid out (scrollState, keep-scroll). */
+  private restoreTo?: ScrollState;
+  private saveTimer?: ReturnType<typeof setTimeout>;
 
   private root?: ShadowRoot;
   private open = true;
@@ -871,6 +892,7 @@ export class ChatBox extends Base {
   private pure: string | null = null;
   private _partial = "";
   private _micActive = false;
+  private _hold = false;
   private _allPages = false;
   /** The input has focus: the log opens. */
   private typing = false;
@@ -1256,10 +1278,33 @@ export class ChatBox extends Base {
     else this.applyMic(!!v);
   }
   /**
+   * Hold the person's draft: nothing goes out by itself (no debounce, no
+   * sentence-jump send), with no mic look. Enter and submit() still send. Attribute: hold.
+   */
+  get hold() {
+    return this._hold;
+  }
+  set hold(v: boolean) {
+    if (typeof this.toggleAttribute === "function") this.toggleAttribute("hold", !!v);
+    else this.applyHold(!!v);
+  }
+  /**
    * The host grants code on every page of this user (its hub widens Allow to
    * "all"): the request says so, Allow sends pages "all", and no page ticks
    * are shown. Attribute: all-pages.
    */
+  /**
+   * Show the menu's echo-cancellation row when a mic is in the box. Default
+   * true; false (attribute no-echo-toggle) hides it, for a host that decides
+   * the mic's processing itself.
+   */
+  get echoToggle() {
+    return !this.hasAttribute("no-echo-toggle");
+  }
+  set echoToggle(v: boolean) {
+    if (typeof this.toggleAttribute === "function") this.toggleAttribute("no-echo-toggle", !v);
+    this.renderMenu();
+  }
   get allPages() {
     return this._allPages;
   }
@@ -1269,13 +1314,20 @@ export class ChatBox extends Base {
   }
   attributeChangedCallback(name: string) {
     if (name === "mic-active") this.applyMic(this.hasAttribute("mic-active"));
+    else if (name === "hold") this.applyHold(this.hasAttribute("hold"));
     else if (name === "all-pages") this.applyAllPages(this.hasAttribute("all-pages"));
+    else if (name === "no-echo-toggle") this.renderMenu();
     else this.renderActions();
   }
   private applyAllPages(v: boolean) {
     if (v === this._allPages) return;
     this._allPages = v;
     this.renderAsks();
+  }
+  private applyHold(v: boolean) {
+    if (v === this._hold) return;
+    this._hold = v;
+    this.arm();
   }
   private applyMic(v: boolean) {
     if (v === this._micActive) return;
@@ -1383,6 +1435,13 @@ export class ChatBox extends Base {
     const userName = this.getAttribute("user-name");
     if (userName && !this._user.name) this._user.name = userName;
     this._micActive = this.hasAttribute("mic-active");
+    this._hold = this.hasAttribute("hold");
+    if (this.hasAttribute("keep-scroll")) {
+      try {
+        const v = JSON.parse(this.read("scroll") ?? "null") as ScrollState;
+        if (v && typeof v.id === "string" && Number.isFinite(v.dy)) this.restoreTo = v;
+      } catch {}
+    }
     this._allPages = this.hasAttribute("all-pages");
     const o = this.read("open");
     this.open = o === null ? this._defaultOpen : o === "1";
@@ -1464,7 +1523,7 @@ export class ChatBox extends Base {
   /** Files alone, no draft: they go out after the debounce, as a typed line would. */
   private armFiles() {
     this.disarm();
-    if (this._micActive || this._partial || this.composing) return;
+    if (this._micActive || this._partial || this._hold || this.composing) return;
     const bar = document.createElement("div");
     bar.className = "drain";
     bar.setAttribute("aria-hidden", "true");
@@ -1782,6 +1841,10 @@ export class ChatBox extends Base {
   private get ui(): UiStrings {
     return { ...uiStrings(), ...this._strings };
   }
+  /** A string with its {placeholders} filled. */
+  private tr(k: keyof UiStrings, v: Record<string, string | number> = {}) {
+    return this.ui[k].replace(/\{(\w+)\}/g, (m, n: string) => (n in v ? String(v[n]) : m));
+  }
   private get treeText(): TreeStrings {
     return { ...TREE_STRINGS_EN, ...treeDefaults(), ...this.treeStrings };
   }
@@ -1801,7 +1864,7 @@ export class ChatBox extends Base {
       style = `<style>${CSS}</style>`;
     }
     r.innerHTML = `${style}
-<section class="box halo" id="box" aria-label="Chat with the agent">
+<section class="box halo" id="box" aria-label="${this.ui.chatWithAgent}">
   <div class="column" id="column">
     <ol class="log" id="log"></ol>
   </div>
@@ -1811,14 +1874,14 @@ export class ChatBox extends Base {
   <div class="filerow" id="filerow" hidden></div>
   <div class="rowbox" id="rowbox">
     <div class="aim" id="aim" hidden></div>
-    <div class="bar" id="bar">
-      <button type="button" class="tap mark" id="mark" title="${MARK_HINT}">${ICONS.mark}<span class="dot" id="dot"></span></button>
+    <div class="bar" id="bar" part="bar">
+      <button type="button" class="tap mark" id="mark" title="${this.ui.markHint}">${ICONS.mark}<span class="dot" id="dot"></span></button>
       <div class="cell" id="lead"></div>
-      <button type="button" class="tap treebtn" id="treebtn" aria-expanded="false" title="${TREE_HINT}">${ICONS.tree}<span class="evals" id="evals" aria-hidden="true" hidden></span><span class="thint" id="thint" role="status" hidden></span></button>
+      <button type="button" class="tap treebtn" id="treebtn" aria-expanded="false" title="${this.ui.treeHint}">${ICONS.tree}<span class="evals" id="evals" aria-hidden="true" hidden></span><span class="thint" id="thint" role="status" hidden></span></button>
       <button type="button" class="tap plus" id="plus" aria-haspopup="menu" aria-expanded="false" hidden>${ICONS.plus}</button>
       <div class="slot" id="slot">
         <div class="mirror" id="mirror" aria-hidden="true" hidden><span class="ghost" id="ghost"></span><span class="partial" id="partial"></span></div>
-        <textarea id="input" rows="1" maxlength="${MAX_CHAT}" aria-label="Message the agent"></textarea>
+        <textarea id="input" rows="1" maxlength="${MAX_CHAT}" aria-label="${this.ui.messageAgentLabel}"></textarea>
         <p class="notice" id="notice" role="status" hidden></p>
         <span class="spin" id="spin" role="status" hidden></span>
       </div>
@@ -1877,13 +1940,24 @@ export class ChatBox extends Base {
 
     this.treeGestures(treebtn);
 
-    column.addEventListener("scroll", () => this.onColumnScroll());
+    column.addEventListener("scroll", () => {
+      this.onColumnScroll();
+      if (Date.now() - this.userScrollAt < USER_SCROLL_MS) this.scrolledByUser();
+    });
+    // A link in a line: no focus on press, so the box does not re-lay out
+    // (focus changes its layout) between press and click.
+    column.addEventListener("mousedown", (e) => {
+      if ((e.target as Element | null)?.closest?.("a[href]")) e.preventDefault();
+    });
     const userScroll = () => {
       this.userScrollAt = Date.now();
       this.ownPin = false;
     };
     column.addEventListener("wheel", userScroll, { passive: true });
     column.addEventListener("touchmove", userScroll, { passive: true });
+    // Dragging the scrollbar, or keys (PageUp, arrows, Home) on the focused log.
+    column.addEventListener("pointerdown", userScroll, { passive: true });
+    column.addEventListener("keydown", userScroll, { passive: true });
     column.addEventListener("transitionend", (e) => {
       if (e.target !== column) return;
       // Shrunk: land on the newest lines again, now that the height settled.
@@ -1951,8 +2025,10 @@ export class ChatBox extends Base {
             if (ta.clientWidth === width) continue;
             width = ta.clientWidth;
             this.fitInput();
-          } else if (e.target === column || e.target === this.els.log) this.repin();
-          else this.placeFloat();
+          } else if (e.target === column || e.target === this.els.log) {
+            if (this.restoreTo !== undefined) this.tryRestore();
+            else this.repin();
+          } else this.placeFloat();
         }
       });
       this.ro.observe(ta);
@@ -2327,11 +2403,17 @@ export class ChatBox extends Base {
     this.disarm();
     // An "@/node" still being typed never goes out by the debounce.
     if (parseAddress(this._draft)?.complete === false) return;
-    const next = afterChange(this._draft, this.settledLen, this.composing);
+    const raw = afterChange(this._draft, this.settledLen, this.composing);
     if (!this.composing) this.settledLen = this._draft.length;
+    // While a mic is on, a transcript is still coming in or the draft is held, nothing goes
+    // out by itself: not the debounce, and not a jump that ends a sentence (a paste).
+    const next = autoSend(raw, {
+      mic: this._micActive,
+      partial: !!this._partial,
+      hold: this._hold,
+    });
     if (next === "send") return void this.submit();
-    // While a mic is on or a transcript is still coming in, nothing goes out by itself.
-    if (next === "idle" || this._micActive || this._partial) return;
+    if (next === "idle") return;
     // A fresh bar on each keystroke drains for the debounce.
     const bar = document.createElement("div");
     bar.className = "drain";
@@ -2440,15 +2522,13 @@ export class ChatBox extends Base {
     const ta = this.els.input as HTMLTextAreaElement | undefined;
     if (!ta) return;
     ta.placeholder = this.holding
-      ? DRAG_HINT
+      ? this.ui.dragHint
       : this._partial
         ? ""
         : this._target !== ROOT_NODE
-          ? `Message ${pathLabel(this._target)}…`
+          ? this.tr("messageNode", { node: pathLabel(this._target) })
           : this._placeholder ||
-            (this._live && !this._listeners
-              ? "Agent offline — your message waits for it…"
-              : "Message the agent…");
+            (this._live && !this._listeners ? this.ui.agentOfflineWaits : this.ui.messageAgent);
   }
   /** The live transcript: a mirror of the draft, invisible, then the partial text dimmed. */
   private renderPartial() {
@@ -2473,7 +2553,7 @@ export class ChatBox extends Base {
       const ul = document.createElement("ul");
       ul.className = "nodes";
       ul.setAttribute("role", "listbox");
-      ul.setAttribute("aria-label", "Nodes to address");
+      ul.setAttribute("aria-label", this.ui.nodesLabel);
       for (const n of list) {
         const li = document.createElement("li");
         li.setAttribute("role", "option");
@@ -2500,7 +2580,7 @@ export class ChatBox extends Base {
         const x = document.createElement("button");
         x.type = "button";
         x.textContent = "×";
-        x.setAttribute("aria-label", "Send to the main thread instead");
+        x.setAttribute("aria-label", this.ui.toMainThread);
         x.addEventListener("pointerdown", (e) => e.preventDefault());
         x.addEventListener("click", () => this.setTarget(ROOT_NODE));
         chip.append(x);
@@ -2540,12 +2620,12 @@ export class ChatBox extends Base {
   }
 
   private status() {
-    if (this._notice) return "chat unavailable";
-    if (this.offline) return "not connected — your draft is kept";
-    if (!this._live) return "reconnecting…";
+    if (this._notice) return this.ui.statusUnavailable;
+    if (this.offline) return this.ui.statusNotConnected;
+    if (!this._live) return this.ui.statusReconnecting;
     return this._listeners
-      ? `agent listening (${this._listeners})`
-      : "agent offline · messages wait until it is back";
+      ? this.tr("statusListening", { n: this._listeners })
+      : this.ui.statusAgentOffline;
   }
 
   private renderAll() {
@@ -2575,6 +2655,9 @@ export class ChatBox extends Base {
     const { box, column, slot, mark, treebtn, tree, tclose, ftree } = this.els as Els;
     const ui = this.ui;
     box.classList.toggle("min", !this.open);
+    // Reflected on the host so the page can style around it: [open] or [min].
+    this.toggleAttribute("open", this.open);
+    this.toggleAttribute("min", !this.open);
     box.classList.toggle("on", this._micActive || this.panel !== "none");
     box.classList.toggle("typing", this.typing && this.open);
     this.renderAttached();
@@ -2625,7 +2708,11 @@ export class ChatBox extends Base {
     badge.textContent = String(unread);
     this.els.mark!.setAttribute(
       "aria-label",
-      this.open ? "Minimize chat" : `Restore chat${unread ? `, ${unread} new` : ""}`,
+      this.open
+        ? this.ui.minimizeChat
+        : unread
+          ? this.tr("restoreChatNew", { n: unread })
+          : this.ui.restoreChat,
     );
     this.renderPlaceholder();
     if (this.panel === "menu") this.renderMenu();
@@ -2641,8 +2728,11 @@ export class ChatBox extends Base {
     b.classList.toggle("ran", this._evalRan);
     const kind = this._friend ? "preview" : "eval";
     this.els.treebtn!.title = evals.length
-      ? `${TREE_HINT}\n${evals.map((x) => `${kind}: ${x.label} · ${x.code}`).join("\n")}`
-      : TREE_HINT;
+      ? `${this.ui.treeHint}\n${evals.map((x) => `${kind}: ${x.label} · ${x.code}`).join("\n")}`
+      : this.ui.treeHint;
+    this.els.mark!.title = this.ui.markHint;
+    this.root.getElementById("box")?.setAttribute("aria-label", this.ui.chatWithAgent);
+    this.els.input?.setAttribute("aria-label", this.ui.messageAgentLabel);
   }
 
   /** The spinner in the input while the agent works. */
@@ -2650,8 +2740,8 @@ export class ChatBox extends Base {
     if (!this.root) return;
     const s = this.els.spin!;
     s.hidden = !this._busy;
-    s.title = "the agent is working";
-    s.setAttribute("aria-label", "the agent is working");
+    s.title = this.ui.agentWorking;
+    s.setAttribute("aria-label", this.ui.agentWorking);
     this.els.input!.classList.toggle("pe", this._busy);
   }
 
@@ -2659,6 +2749,7 @@ export class ChatBox extends Base {
   private renderAsks() {
     if (!this.root) return;
     const row = this.els.asks!;
+    row.setAttribute("aria-label", this.ui.asksLabel);
     row.replaceChildren();
     const p = this._pending;
     if (p) row.append(this.renderAsk(p));
@@ -2676,15 +2767,15 @@ export class ChatBox extends Base {
     ask.setAttribute("role", "alertdialog");
     // The host widens code to every page (all-pages): say so, not "chosen".
     const all = this._allPages && !this._friend;
-    const where = all ? "on all your pages, including pages opened later," : "on the chosen pages";
+    const where = all ? this.ui.askWhereAll : this.ui.askWhereChosen;
     const what = this._friend
-      ? `to run code ${where} for 1 hour`
+      ? this.tr("askFriend", { where })
       : p.scope === "eval"
-        ? `to run code ${where} and chat, for 8 hours`
+        ? this.tr("askEval", { where })
         : p.scope === "chat"
-          ? "to chat with you, for 30 days"
-          : "to run code on your pages, or to chat";
-    const sentence = `${p.label} asks ${what}. Allow only if the agent shows the same code: ${p.code}.`;
+          ? this.ui.askChat
+          : this.ui.askOld;
+    const sentence = this.tr("askSentence", { label: p.label, what, code: p.code });
     ask.setAttribute("aria-label", sentence);
     ask.title = sentence;
     ask.innerHTML = ICONS.lock;
@@ -2695,10 +2786,10 @@ export class ChatBox extends Base {
       const tag = document.createElement("span");
       tag.className = "tag";
       tag.textContent = this._friend
-        ? "code · 1h"
+        ? this.ui.tagCode1h
         : p.scope === "eval"
-          ? "code · 8h"
-          : "chat · 30d";
+          ? this.ui.tagCode8h
+          : this.ui.tagChat30d;
       ask.append(tag);
     }
     if (!this.picked.has(p.pair)) this.picked.set(p.pair, new Set(this._self ? [this._self] : []));
@@ -2720,26 +2811,18 @@ export class ChatBox extends Base {
       ask.append(b);
     };
     if (p.scope || this._friend)
-      btn(
-        "y",
-        "Allow",
-        all ? "Allow on all your pages, including pages opened later" : "Allow on the ticked pages",
-        () => this.onAnswer?.("allow", p, { pages: pages() }),
+      btn("y", this.ui.allow, all ? this.ui.allowAllTitle : this.ui.allowTickedTitle, () =>
+        this.onAnswer?.("allow", p, { pages: pages() }),
       );
     else {
-      btn(
-        "y",
-        "8h",
-        all
-          ? "Allow code on all your pages and chat, for 8 hours"
-          : "Allow code and chat for 8 hours",
-        () => this.onAnswer?.("allow", p, { pages: pages() }),
+      btn("y", this.ui.allow8h, all ? this.ui.allow8hAllTitle : this.ui.allow8hTitle, () =>
+        this.onAnswer?.("allow", p, { pages: pages() }),
       );
-      btn("c", "chat", "Chat only, for 30 days", () =>
+      btn("c", this.ui.chatOnly, this.ui.chatOnlyTitle, () =>
         this.onAnswer?.("allow", p, { pages: pages(), scope: "chat" }),
       );
     }
-    btn("n", "✕", "Deny", () => this.onAnswer?.("deny", p, {}));
+    btn("n", "✕", this.ui.deny, () => this.onAnswer?.("deny", p, {}));
     // Chat always covers every page: only code (eval, or an older agent's
     // hour) asks which pages.
     if (all || this._pages.length < 2 || (p.scope === "chat" && !this._friend)) return ask;
@@ -2759,7 +2842,7 @@ export class ChatBox extends Base {
     const allTicked = picked === "all";
     for (const pg of this._pages)
       box(
-        `${pageHint(pg.label)}${pg.id === this._self ? " (this page)" : ""}`,
+        `${pageHint(pg.label)}${pg.id === this._self ? this.ui.thisPage : ""}`,
         allTicked || (picked as Set<string>).has(pg.id),
         (v) => {
           const cur = this.picked.get(p.pair);
@@ -2770,7 +2853,7 @@ export class ChatBox extends Base {
           this.renderAsks();
         },
       );
-    box("all pages, and pages opened later", allTicked, (v) => {
+    box(this.ui.pagesAllLater, allTicked, (v) => {
       this.picked.set(p.pair, v ? "all" : new Set(this._self ? [this._self] : []));
       this.renderAsks();
     });
@@ -2830,11 +2913,11 @@ export class ChatBox extends Base {
     return out;
   }
   private lineText(m: ChatMessage, onToggle: () => void): Node[] {
-    if (!m.edited || m.raw === undefined) return [document.createTextNode(m.text)];
+    if (!m.edited || m.raw === undefined) return linkify(m.text);
     const raw = this.rawIds.has(m.id);
     const body = document.createElement("span");
     if (raw) body.className = "raw";
-    body.textContent = raw ? m.raw : m.text;
+    body.append(...linkify(raw ? m.raw : m.text));
     const mark = document.createElement("button");
     mark.type = "button";
     mark.className = "polished";
@@ -2857,7 +2940,7 @@ export class ChatBox extends Base {
     if (this._messages.length === 0) {
       const li = document.createElement("li");
       li.className = "hint";
-      li.textContent = `Type here; it is sent ${DEBOUNCE_MS / 1000} s after you stop.`;
+      li.textContent = this.tr("hintType", { s: DEBOUNCE_MS / 1000 });
       log.append(li);
     }
     // A game-style log: one line per message, avatar then text, no bubbles;
@@ -2865,6 +2948,7 @@ export class ChatBox extends Base {
     for (const m of this._messages) {
       const li = document.createElement("li");
       li.dataset.from = m.from;
+      li.dataset.id = m.id;
       const who = lineAvatar(m, {
         friend: this._friend,
         user: this._user,
@@ -2910,9 +2994,73 @@ export class ChatBox extends Base {
       li.append(av, text);
       log.append(li);
     }
-    if (this.open && this.atEnd) this.toEnd();
+    if (this.restoreTo !== undefined) this.tryRestore();
+    else if (this.open && this.atEnd) this.toEnd();
     this.onColumnScroll();
     this.renderStatus();
+  }
+
+  /**
+   * Where the log is scrolled (ScrollState): read it to keep it in your own
+   * storage, set it to go back there (it waits until that line is rendered
+   * and the log is shown; a line that is gone leaves the log at its end).
+   * With the keep-scroll attribute the box keeps it itself, under its
+   * storage-key. A "scroll-state" event (detail: the state) follows the
+   * user's own scrolling.
+   */
+  get scrollState(): ScrollState {
+    if (this.restoreTo !== undefined) return this.restoreTo;
+    const c = this.els.column;
+    if (!c || !c.clientHeight || this.atEnd) return null;
+    const top = c.getBoundingClientRect().top;
+    for (const li of this.els.log!.querySelectorAll<HTMLElement>("li[data-id]")) {
+      const r = li.getBoundingClientRect();
+      if (r.bottom > top) return { id: li.dataset.id!, dy: Math.round(top - r.top) };
+    }
+    return null;
+  }
+  set scrollState(v: ScrollState) {
+    if (v === null) {
+      this.restoreTo = undefined;
+      this.atEnd = true;
+      this.toEnd();
+      return;
+    }
+    if (!v || typeof v.id !== "string" || !Number.isFinite(v.dy)) return;
+    this.restoreTo = { id: v.id, dy: v.dy };
+    this.tryRestore();
+  }
+  /** Go to restoreTo if its line is there and the log is laid out; drop it if the line is gone. */
+  private tryRestore() {
+    const want = this.restoreTo;
+    const c = this.els.column;
+    if (!want || !c || !this.open || !c.clientHeight) return;
+    const li = [...this.els.log!.querySelectorAll<HTMLElement>("li[data-id]")].find(
+      (x) => x.dataset.id === want.id,
+    );
+    if (!li) {
+      // History is in and the line is not: it is gone, so the newest line it is.
+      if (this._messages.length) {
+        this.restoreTo = undefined;
+        this.toEnd();
+      }
+      return;
+    }
+    this.restoreTo = undefined;
+    this.atEnd = false;
+    this.ownPin = false;
+    c.scrollTop += li.getBoundingClientRect().top - c.getBoundingClientRect().top + want.dy;
+    this.onColumnScroll();
+  }
+  /** The user scrolled: a pending restore is moot; keep and announce the new position. */
+  private scrolledByUser() {
+    this.restoreTo = undefined;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => {
+      const v = this.scrollState;
+      if (this.hasAttribute("keep-scroll")) this.write("scroll", JSON.stringify(v));
+      this.dispatchEvent(new CustomEvent("scroll-state", { detail: v }));
+    }, 200);
   }
   private toEnd() {
     const c = this.els.column;
@@ -2925,7 +3073,9 @@ export class ChatBox extends Base {
     if (!c) return;
     c.classList.toggle("fade", c.scrollHeight > c.clientHeight + 1 || c.scrollTop > 0);
     const gap = c.scrollHeight - c.scrollTop - c.clientHeight;
-    this.atEnd = stillAtEnd({ gap, ownPin: this.ownPin && this.atEnd, userScrolled: false });
+    // Only the user's own scrolling leaves the end (src/log-pin.ts atEndAfter).
+    const userScrolled = Date.now() - this.userScrollAt < USER_SCROLL_MS;
+    this.atEnd = atEndAfter({ atEnd: this.atEnd, gap, clientHeight: c.clientHeight, userScrolled });
     if (gap < 4) this.ownPin = false;
   }
   /** The log or its lines changed size: a log at its end stays there (src/log-pin.ts). */
@@ -3022,7 +3172,7 @@ export class ChatBox extends Base {
     const who = document.createElement("span");
     who.className = "who";
     who.style.color = m.from !== "agent" ? "oklch(0.55 0.13 250)" : "oklch(0.55 0.14 150)";
-    who.textContent = `${m.from !== "agent" ? "you" : m.label || "agent"}:`;
+    who.textContent = `${m.from !== "agent" ? this.ui.you : m.label || this.ui.agentName}:`;
     li.replaceChildren(who, ...this.lineBody(m, () => this.renderFloatTexts()));
   }
   private renderFloatTexts() {
@@ -3340,13 +3490,7 @@ export class ChatBox extends Base {
     const on = this.speaking || this._micActive;
     speak.setAttribute("aria-checked", String(on));
     speak.innerHTML = ICONS.speaker;
-    speak.append(
-      this._micActive
-        ? "Replies read aloud (mic on)"
-        : on
-          ? "Replies read aloud"
-          : "Replies silent",
-    );
+    speak.append(this._micActive ? this.ui.readAloudMic : on ? this.ui.readAloud : this.ui.silent);
     speak.addEventListener("click", () => {
       if (this._micActive) return;
       const v = !this.speaking;
@@ -3358,9 +3502,9 @@ export class ChatBox extends Base {
     const rate = document.createElement("div");
     rate.className = "rate";
     rate.setAttribute("role", "radiogroup");
-    rate.setAttribute("aria-label", "Reading speed");
+    rate.setAttribute("aria-label", this.ui.speedLabel);
     const lab = document.createElement("span");
-    lab.textContent = "Speed";
+    lab.textContent = this.ui.speed;
     rate.append(lab);
     const cur = this.speechRate;
     for (const r of SPEECH_RATES) {
@@ -3378,7 +3522,8 @@ export class ChatBox extends Base {
     }
     menu.append(status, speak, rate);
     // Echo cancellation (src/aec.ts), when a mic is in the box: a tap reopens an open mic.
-    if ((this.els.micslot as HTMLSlotElement).assignedElements?.().length) {
+    // The host can hide it (no-echo-toggle / echoToggle = false): its own mic settings rule.
+    if (this.echoToggle && (this.els.micslot as HTMLSlotElement).assignedElements?.().length) {
       const aec = document.createElement("button");
       aec.type = "button";
       aec.setAttribute("role", "menuitemcheckbox");
@@ -3400,7 +3545,7 @@ export class ChatBox extends Base {
     const min = document.createElement("button");
     min.type = "button";
     min.setAttribute("role", "menuitem");
-    min.textContent = this.open ? "–  Minimize" : "+  Restore";
+    min.textContent = this.open ? this.ui.minimize : this.ui.restore;
     min.addEventListener("click", () => {
       this.setPanel("none");
       this.setOpen(!this.open);
@@ -3412,12 +3557,20 @@ export class ChatBox extends Base {
       const label = document.createElement("span");
       const where =
         x.pages === undefined || x.pages === "all"
-          ? "all pages"
-          : `${x.pages.length} page${x.pages.length === 1 ? "" : "s"}`;
-      label.textContent = `${x.scope === "chat" ? "chat" : this._friend ? "preview" : "eval"}: ${x.label} · ${x.code} · ${where}`;
+          ? this.ui.allPages
+          : x.pages.length === 1
+            ? this.ui.pagesOne
+            : this.tr("pagesN", { n: x.pages.length });
+      const kind =
+        x.scope === "chat"
+          ? this.ui.sessChat
+          : this._friend
+            ? this.ui.sessPreview
+            : this.ui.sessEval;
+      label.textContent = `${kind}: ${x.label} · ${x.code} · ${where}`;
       const end = document.createElement("button");
       end.type = "button";
-      end.textContent = "End";
+      end.textContent = this.ui.end;
       end.addEventListener("click", () => {
         this.setPanel("none");
         this.onEnd?.(x);
@@ -3428,19 +3581,19 @@ export class ChatBox extends Base {
     if (this._pages.length < 2) return;
     const head = document.createElement("span");
     head.className = "head";
-    head.textContent = "Your open pages";
+    head.textContent = this.ui.openPages;
     menu.append(head);
     for (const pg of this._pages) {
       const row = document.createElement("div");
       row.className = "pg";
       const label = document.createElement("span");
       const mine = pg.id === this._self;
-      label.textContent = `${pageHint(pg.label)}${mine ? " (this page)" : ""}`;
+      label.textContent = `${pageHint(pg.label)}${mine ? this.ui.thisPage : ""}`;
       label.title = pg.label;
       const end = document.createElement("button");
       end.type = "button";
       // Ending this very page takes a second tap.
-      end.textContent = mine && this.confirmEnd === pg.id ? "End this page?" : "End";
+      end.textContent = mine && this.confirmEnd === pg.id ? this.ui.endThisPage : this.ui.end;
       end.addEventListener("click", () => {
         if (mine && this.confirmEnd !== pg.id) {
           this.confirmEnd = pg.id;
