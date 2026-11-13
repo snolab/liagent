@@ -24,7 +24,8 @@ beforeAll(() => {
     port: 0,
     hostname: "127.0.0.1",
     fetch(req, srv) {
-      return srv.upgrade(req) ? undefined : new Response("ws only", { status: 426 });
+      if (srv.upgrade(req, { data: undefined })) return undefined;
+      return new Response("ws only", { status: 426 });
     },
     websocket: {
       open(ws) {
@@ -43,8 +44,9 @@ beforeAll(() => {
       message(ws, data) {
         const m = JSON.parse(String(data)) as Msg;
         received.push(m);
-        const fail = (reason: string) =>
+        const fail = (reason: string) => {
           ws.send(JSON.stringify({ type: "error", error: reason, reason }));
+        };
         if (m.type === "edit") {
           const line = HISTORY.find((x) => x.id === m.id);
           if (!line)
@@ -59,11 +61,10 @@ beforeAll(() => {
             return fail(
               `message ${m.id} was typed, not spoken: only voice (stt) lines may be polished`,
             );
-          return ws.send(
-            JSON.stringify({ type: "edited", id: m.id, thread: "owner", text: m.text }),
-          );
+          ws.send(JSON.stringify({ type: "edited", id: m.id, thread: "owner", text: m.text }));
+          return;
         }
-        if (m.type === "say") return ws.send(JSON.stringify({ type: "said", id: "r1" }));
+        if (m.type === "say") ws.send(JSON.stringify({ type: "said", id: "r1" }));
       },
     },
   });
