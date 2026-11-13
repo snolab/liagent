@@ -4,6 +4,14 @@
 
 ### Added
 
+- **`liagent reply`.** A say that first polishes the line it answers:
+  `liagent reply --id <msgId> --polish "…" "reply"` edits that line (as
+  `liagent edit <msgId>` would), then posts the reply. `--polish` always
+  needs `--id`, never "the latest line", and never goes with a friend's
+  `--to`; a polish the hub refuses is reported and the reply still goes out.
+  `listen --to`'s header now says `liagent reply …`, with `--id <id>
+  [--polish "..."]` on the user's own voice (stt) lines only.
+
 - **Files in the chat.** `box.files` takes the host's file handling
   (`ChatFiles`: `upload(file, onProgress, signal)` → `{id, name, type, size}`,
   `url(ref)`, and optionally `maxBytes`, `list()`, `remove(id)`,
