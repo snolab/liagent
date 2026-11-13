@@ -14,4 +14,7 @@ describe("box CSS", () => {
   it("gives the text inputs a 16px font (no iOS focus zoom)", () => {
     expect((src.match(/font-size: 16px;/g) ?? []).length).toBeGreaterThanOrEqual(2);
   });
+  it("links in a line take clicks (the log is pointer-events: none)", () => {
+    expect(src).toContain(".text a { pointer-events: auto;");
+  });
 });
