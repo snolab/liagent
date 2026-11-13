@@ -225,6 +225,11 @@ export function createMicSession<C = unknown>(
   };
   const fallback = deps.fallback;
   let prev: MicState = "off";
+  /** The explicit off's cleanup while it runs (shared by a second off; toggle and resume wait for it). */
+  let teardown: Promise<void> | null = null;
+  /** Taps during a teardown: the intent they add up to, and a counter so only the last one acts. */
+  let intent: "on" | "off" | null = null;
+  let taps = 0;
   /** The last audio frame's time (0: none yet). */
   let lastFrame = 0;
   const mic = createMic({
@@ -346,6 +351,21 @@ export function createMicSession<C = unknown>(
     /** A tap: on (remembered for a reload), or an explicit off. */
     async toggle() {
       emit({ error: null });
+      // Taps during an off's teardown collapse to the last intent, applied once it ends (a new
+      // stream, never the dying one); an off() meanwhile cancels them (a closed window stays off).
+      if (teardown) {
+        intent = intent === "on" ? "off" : "on";
+        const my = ++taps;
+        await teardown;
+        if (my !== taps) return; // a later tap or an off() decides
+        const want = intent;
+        intent = null;
+        if (want === "on" && mic.state() === "off") {
+          store.on();
+          await mic.toggle();
+        }
+        return;
+      }
       if (mic.state() === "off") {
         store.on();
         await mic.toggle();
@@ -354,14 +374,44 @@ export function createMicSession<C = unknown>(
     /** The explicit off: the VAD, the stream and the reload flag all go. */
     async off() {
       offs++;
+      // Any tap still waiting is cancelled: off wins.
+      taps++;
+      intent = null;
+      // One teardown at a time: a second off() shares the first one's promise.
+      if (teardown) return teardown;
       store.clear();
       emit({ resume: false });
       epoch++;
-      // The tracks stop whatever the VAD cleanup does (a half-initialised VAD throws).
-      try {
-        await mic.off();
-      } finally {
-        stopStream();
+      // This off owns the stream it found; a newer one is never touched.
+      const own = stream;
+      stream = null;
+      teardown = (async () => {
+        // The tracks stop whatever the VAD cleanup does (a half-initialised VAD throws).
+        try {
+          await mic.off();
+        } finally {
+          for (const t of own?.getTracks() ?? []) t.stop();
+        }
+      })().finally(() => {
+        teardown = null;
+      });
+      return teardown;
+    },
+    /**
+     * Retry (no audio): off, then on again once the cleanup is done, on a new
+     * stream. The pending "on" is not a tap: any tap meanwhile cancels it and
+     * counts as if there had been no retry, from off (1 tap ends on, 2 end
+     * off); an off() (a closed window) cancels it and stays off.
+     */
+    async retry() {
+      emit({ error: null });
+      const done = session.off();
+      const my = ++taps;
+      await done;
+      if (my !== taps) return; // a tap or an off() since decides
+      if (mic.state() === "off") {
+        store.on();
+        await mic.toggle();
       }
     },
     hold: (on: boolean) => mic.hold(on),

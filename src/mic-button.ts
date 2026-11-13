@@ -149,6 +149,11 @@ export type MicStrings = MicErrorStrings & {
   /** Said by the live region when the agent starts speaking. */
   liveSpeaking: string;
   noStt: string;
+  /**
+   * A visible label under the icon while capturing (e.g. "録音"), for hosts
+   * that want a text sign besides the ring. Empty (the default): no label.
+   */
+  rec?: string;
 };
 export const MIC_STRINGS_EN: MicStrings = {
   ...MIC_ERROR_STRINGS_EN,
@@ -171,6 +176,14 @@ export function micLabel(
   if (v.state === "off") return v.resume ? t.resume : t.dictate;
   if (status === "speaking") return t.speaking;
   return v.state === "capturing" ? t.recording : t.listening;
+}
+
+/** The visible label under the icon: the host's strings.rec while capturing, else none. */
+export function micRec(
+  v: Pick<MicView, "state">,
+  t: Pick<MicStrings, "rec"> = MIC_STRINGS_EN,
+): string {
+  return v.state === "capturing" && t.rec ? t.rec : "";
 }
 
 /** What the live region says: the coarse state only, so capture starting and stopping per utterance stays quiet. */
@@ -278,6 +291,8 @@ button[data-status="speaking"] { color: var(--talk); }
 button[data-status="speaking"]::before { box-shadow: 0 0 0 2px var(--talk); animation: pulse 2.4s ease-in-out infinite; }
 button[data-resume]::before { border: 2px dashed var(--rec); }
 svg { width: 1em; height: 1em; fill: currentColor; }
+.rec { font-size: 8px; font-weight: 700; color: var(--rec); line-height: 1; }
+.rec[hidden] { display: none; }
 .live {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
   overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
@@ -318,6 +333,7 @@ export class MicElement extends Base {
   private btn?: HTMLButtonElement;
   private path?: SVGPathElement;
   private liveEl?: HTMLSpanElement;
+  private recEl?: HTMLSpanElement;
   private noteEl?: HTMLSpanElement;
   private off: (() => void)[] = [];
   /** Works out the page-audio hold again (src/page-audio.ts), while connected. */
@@ -568,7 +584,12 @@ export class MicElement extends Base {
     live.className = "live";
     live.setAttribute("role", "status");
     live.setAttribute("aria-live", "polite");
-    btn.append(svg);
+    // The host's optional visible label (strings.rec), shown while capturing.
+    const rec = (this.recEl = document.createElement("span"));
+    rec.className = "rec";
+    rec.setAttribute("aria-hidden", "true");
+    rec.hidden = true;
+    btn.append(svg, rec);
     // Keeps the input's focus: the box stays open while dictating.
     btn.addEventListener("pointerdown", (e) => e.preventDefault());
     btn.addEventListener("click", () => {
@@ -596,6 +617,10 @@ export class MicElement extends Base {
     btn.title = micLabel(v, status, t);
     this.path.setAttribute("d", v.state === "off" ? MIC_PATH.regular : MIC_PATH.fill);
     this.liveEl.textContent = micLive(v, status, t);
+    if (this.recEl) {
+      this.recEl.textContent = micRec(v, t);
+      this.recEl.hidden = !this.recEl.textContent;
+    }
     const note = v.error ? (v.error instanceof NoStt ? t.noStt : micErrorNote(v.error, t)) : "";
     this.noteEl.textContent = note;
     if (v.error && v.error !== this.last.error) this.fire("mic-error", { error: v.error, note });
