@@ -116,6 +116,10 @@ export type MicDeps<C = unknown> = {
   onUtterance?: (u: Utterance, cfg: C | undefined) => void;
   /** A reload's resume attempt, once it is decided. */
   onResume?: (r: ResumeOutcome) => void;
+  /** Every audio frame while listening (a heartbeat; not throttled). session.lastFrameAt() polls it instead. */
+  onFrameBeat?: (at: number) => void;
+  /** No frame this long while listening: view.error gets a MicStalledError (default STALL_MS, 0 = off). */
+  stallMs?: number;
   /** sessionStorage, guarded (iOS private mode throws). */
   storage?: {
     get(k: string): string | null;
@@ -221,6 +225,8 @@ export function createMicSession<C = unknown>(
   };
   const fallback = deps.fallback;
   let prev: MicState = "off";
+  /** The last audio frame's time (0: none yet). */
+  let lastFrame = 0;
   const mic = createMic({
     load: async (ev) => {
       const e = epoch;
@@ -258,6 +264,9 @@ export function createMicSession<C = unknown>(
       const was = prev;
       prev = s;
       emit({ state: s, ...(s !== "off" ? { resume: false } : {}) });
+      // Startup failed (the VAD load, the fallback or start() rejected): the mic says off,
+      // so the tracks stop too. retire() has already taken the stream, so it is not touched.
+      if (s === "off" && was === "loading") stopStream();
       if (voice) {
         voice.setMic(s !== "off");
         // The user starts talking: over the agent it ducks (a barge-in if they
@@ -273,6 +282,16 @@ export function createMicSession<C = unknown>(
       sink?.onPending(n, interim);
     },
     onError: (e) => emit({ error: e }),
+    // Audio is back: a stall note goes (any other error stays until the next tap).
+    onRecover: () => {
+      if ((view.error as { name?: string } | null)?.name === "MicStalledError")
+        emit({ error: null });
+    },
+    onFrameBeat: (at) => {
+      lastFrame = at;
+      deps.onFrameBeat?.(at);
+    },
+    ...(deps.stallMs !== undefined ? { stallMs: deps.stallMs } : {}),
     onProb: (p) => voice?.userFrame?.(p),
   });
 
@@ -346,6 +365,8 @@ export function createMicSession<C = unknown>(
       }
     },
     hold: (on: boolean) => mic.hold(on),
+    /** When the last audio frame arrived (ms since epoch; 0 if none): a heartbeat to poll. */
+    lastFrameAt: () => lastFrame,
     /**
      * The page plays its own audio (src/page-audio.ts) with echo cancellation
      * off: capture is held while it does, together with the voice's hold.
