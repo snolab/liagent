@@ -92,11 +92,14 @@ listen"`). Two listeners mean every message is answered twice.
   prefixed with a header that holds the reply command:
 
   ```
-  [liagent 3f2a9c1e] the user wrote in the chat box (/settings) — reply: liagent say https://dev.example.com/api/chat "..."
+  [liagent 3f2a9c1e] the user wrote in the chat box (/settings) — reply: liagent reply https://dev.example.com/api/chat "..."
   Make the toggle bigger please.
   ```
 
-  The path in the parentheses is the page they were on. A message longer
+  The path in the parentheses is the page they were on. A line from the
+  user's mic (`source: "stt"`) offers the polish too, tied to that line:
+  `… — reply: liagent reply <hub> --id 3f2a9c1e [--polish "..."] "..."`;
+  a friend's line never does (`--to <email>` instead). A message longer
   than about 900 characters arrives as a preview, plus the path of a file
   under `~/.config/liagent/inbox/` holding the full text.
 
@@ -154,7 +157,14 @@ user line that came from the box's own mic carries `"source":"stt"` in
 ```bash
 liagent edit --last "Fix the sync button on /words."
 liagent edit <msgId> "Fix the sync button on /words."
+liagent reply --id <msgId> --polish "Fix the sync button on /words." "On it."   # polish, then reply, in one turn
 ```
+
+`reply --polish` always takes the `--id` of the line being answered (the
+`[liagent <id>]` in its delivery), never "the latest line": a newer
+utterance may have arrived while you worked, and the hub refuses to polish
+anything but the user's latest, so a stale id is reported and the reply
+still goes out. It never goes with a friend's `--to`.
 
 The hub (`{type:"edit", id, text}`) accepts it only if: you hold a live
 grant from the user (chat or eval; never a friend's preview pairing), the

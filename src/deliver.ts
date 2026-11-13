@@ -16,9 +16,17 @@ export function deliveryText(
   spill: (id: string, text: string) => string,
 ): string {
   const who = m.from === "friend" ? `friend ${m.email || m.thread}` : "the user";
-  const replyTo = m.from === "friend" ? ` --to ${m.email || m.thread}` : "";
   const page = m.label.split(" ")[0] || "?";
-  const header = `[liagent ${m.id}] ${who} wrote in the chat box (${page}) — reply: liagent say ${hub}${replyTo} "..."\n`;
+  // The reply command: a friend's thread by --to (their line is never polished); the
+  // user's own voice line may be polished in the same turn, by this line's id, so a
+  // newer utterance is never the one rewritten.
+  const how =
+    m.from === "friend"
+      ? ` --to ${m.email || m.thread}`
+      : m.source === "stt"
+        ? ` --id ${m.id} [--polish "..."]`
+        : "";
+  const header = `[liagent ${m.id}] ${who} wrote in the chat box (${page}) — reply: liagent reply ${hub}${how} "..."\n`;
   const body = m.text + contextText(m.context) + attachmentsText(m.attachments) + ctxText(m.ctx);
   if (header.length + body.length <= SEND_MAX) return header + body;
   const path = spill(m.id, body);

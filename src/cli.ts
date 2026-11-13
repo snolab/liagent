@@ -30,6 +30,15 @@ const USAGE = `liagent — the agent's side of the user ⇄ agent chat (src/hub.
       aloud in that language (else it is guessed from the script).
       --loud is deprecated: accepted and ignored (a plain say).
 
+  liagent reply  [hub] [--id <msgId> --polish "…"] "text" | -   [--to <email|user id>] [--quiet] [--lang <tag>]
+      A say that first polishes the line it answers: --id is the line's id
+      (listen's delivery starts with [liagent <id>]) and --polish its
+      corrected text, as "liagent edit <msgId>" would; then the reply is
+      posted. --polish always needs --id (never "the latest line", which may
+      be a newer one), and never goes with a friend's --to: a friend's line
+      cannot be polished. A polish the hub refuses (not the user's latest,
+      typed, polished 3 times already) is reported; the reply still goes out.
+
   liagent say    [hub] "text" --to /words/audio
       Address a state-tree node instead (a --to starting with "/"): its
       agent gets it, its ancestors observe it. Allowed into your own
@@ -534,7 +543,10 @@ async function main() {
     ws.close();
     return;
   }
-  if (cmd === "say") {
+  if (cmd === "say" || cmd === "reply") {
+    // reply: say, with the line being answered polished first (--polish, with its --id).
+    const polish = cmd === "reply" ? flag("--polish") : undefined;
+    const polishId = cmd === "reply" ? flag("--id") : undefined;
     const to = flag("--to");
     const quiet = takeSwitch("--quiet");
     const lang = flag("--lang");
@@ -543,7 +555,37 @@ async function main() {
       console.error("liagent: say --loud is deprecated and does nothing (a plain say)");
     const text = await readText();
     if (!text) usage(2);
+    if (polish !== undefined) {
+      // A polish is tied to the line being answered: its id from listen's header, never
+      // "the latest line", which may be a newer utterance; and never a friend's line.
+      if (to && !to.startsWith("/")) {
+        console.error(
+          "liagent: reply --polish is for the user's own voice line; a friend's line can never be polished (drop --polish)",
+        );
+        process.exit(2);
+      }
+      if (!polishId) {
+        console.error(
+          "liagent: reply --polish needs --id <msgId>: the line being answered ([liagent <id>] in listen's delivery)",
+        );
+        process.exit(2);
+      }
+      if (!polish.trim()) {
+        console.error("liagent: reply --polish needs the polished text");
+        process.exit(2);
+      }
+    }
     const ws = await connectOrExit(hub);
+    if (polish !== undefined && polishId) {
+      // The hub keeps its rules (the user's latest stt line only, at most MAX_EDITS times):
+      // a refused polish is reported, and the reply still goes out.
+      try {
+        const r = await request(ws, { type: "edit", id: polishId, text: polish }, "edited");
+        console.error(`polished ${r.id}`);
+      } catch (e) {
+        console.error(`liagent: not polished: ${(e as Error).message}; replying anyway`);
+      }
+    }
     const r = await request(
       ws,
       {
