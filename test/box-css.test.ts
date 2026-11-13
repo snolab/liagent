@@ -17,4 +17,8 @@ describe("box CSS", () => {
   it("links in a line take clicks (the log is pointer-events: none)", () => {
     expect(src).toContain(".text a { pointer-events: auto;");
   });
+  it("lets the host size the log (--liagent-log-max, --liagent-log-max-wide)", () => {
+    expect(src).toMatch(/\.column \{\s*max-height: var\(--liagent-log-max, 4\.4rem\)/);
+    expect(src).toContain(".column.wide { max-height: var(--liagent-log-max-wide, 30vh); }");
+  });
 });
