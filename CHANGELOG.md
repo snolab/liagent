@@ -11,6 +11,10 @@
   outside (balanced parens stay in); links stop at 、。）」』】 and U+3000.
   Links take clicks although the log is `pointer-events: none`, and a press
   on one does not move focus.
+- **Box style hooks.** The bar is exposed as `part="bar"`;
+  `--liagent-bar-radius-top` and `--liagent-bar-radius-bottom` set its top
+  and bottom corner radii (default: the round bar as before); the host
+  element reflects its layout as `[open]` or `[min]`.
 - **Files in the chat.** `box.files` takes the host's file handling
   (`ChatFiles`: `upload(file, onProgress, signal)` → `{id, name, type, size}`,
   `url(ref)`, and optionally `maxBytes`, `list()`, `remove(id)`,

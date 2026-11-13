@@ -481,7 +481,10 @@ img.av { display: block; object-fit: cover; }
 .min .rowbox { grid-template-columns: 0fr 1fr; }
 .bar {
   pointer-events: auto; position: relative; display: flex; align-items: flex-end;
-  padding: var(--bar-pad); border-radius: var(--bar-r); border: var(--bar-b) solid var(--line); background: var(--glass);
+  padding: var(--bar-pad);
+  /* The host can square or round the top and bottom separately (::part(bar) works too). */
+  border-radius: var(--liagent-bar-radius-top, var(--bar-r)) var(--liagent-bar-radius-top, var(--bar-r)) var(--liagent-bar-radius-bottom, var(--bar-r)) var(--liagent-bar-radius-bottom, var(--bar-r));
+  border: var(--bar-b) solid var(--line); background: var(--glass);
   backdrop-filter: blur(12px) saturate(1.5); -webkit-backdrop-filter: blur(12px) saturate(1.5);
   touch-action: none; text-shadow: none;
   transition: border-color .15s ease-out, background-color .15s ease-out;
@@ -1871,7 +1874,7 @@ export class ChatBox extends Base {
   <div class="filerow" id="filerow" hidden></div>
   <div class="rowbox" id="rowbox">
     <div class="aim" id="aim" hidden></div>
-    <div class="bar" id="bar">
+    <div class="bar" id="bar" part="bar">
       <button type="button" class="tap mark" id="mark" title="${this.ui.markHint}">${ICONS.mark}<span class="dot" id="dot"></span></button>
       <div class="cell" id="lead"></div>
       <button type="button" class="tap treebtn" id="treebtn" aria-expanded="false" title="${this.ui.treeHint}">${ICONS.tree}<span class="evals" id="evals" aria-hidden="true" hidden></span><span class="thint" id="thint" role="status" hidden></span></button>
@@ -2652,6 +2655,9 @@ export class ChatBox extends Base {
     const { box, column, slot, mark, treebtn, tree, tclose, ftree } = this.els as Els;
     const ui = this.ui;
     box.classList.toggle("min", !this.open);
+    // Reflected on the host so the page can style around it: [open] or [min].
+    this.toggleAttribute("open", this.open);
+    this.toggleAttribute("min", !this.open);
     box.classList.toggle("on", this._micActive || this.panel !== "none");
     box.classList.toggle("typing", this.typing && this.open);
     this.renderAttached();
