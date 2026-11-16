@@ -37,8 +37,8 @@ describe("linkParts: boundaries", () => {
       "〕",
       "　",
     ])
-      expect(urls(`「https://form.symval.net/a?b=1${stop}次`)).toEqual([
-        "https://form.symval.net/a?b=1",
+      expect(urls(`「https://form.example.test/a?b=1${stop}次`)).toEqual([
+        "https://form.example.test/a?b=1",
       ]);
   });
   it("keeps the text around links and handles several", () => {
@@ -65,7 +65,7 @@ describe("linkify: XSS", () => {
   it("keeps <script> as text and out of links", () => {
     const s = '<script>alert(1)</script> https://a.example/<script>"x';
     expect(urls(s)).toEqual(["https://a.example/"]);
-    const nodes = linkify(s, doc, "https://form.symval.net") as unknown as (
+    const nodes = linkify(s, doc, "https://form.example.test") as unknown as (
       | FakeEl
       | { data: string }
     )[];
@@ -76,7 +76,7 @@ describe("linkify: XSS", () => {
 });
 
 describe("linkify: same host vs external", () => {
-  const page = "https://form.symval.net";
+  const page = "https://form.example.test";
   it("external hosts open in a new tab with noopener noreferrer", () => {
     const [a] = linkify("https://evil.example/x", doc, page) as unknown as FakeEl[];
     expect(a).toEqual({
@@ -88,16 +88,16 @@ describe("linkify: same host vs external", () => {
     });
   });
   it("same-origin links stay in the tab", () => {
-    const [a] = linkify("https://form.symval.net/r/1", doc, page) as unknown as FakeEl[];
+    const [a] = linkify("https://form.example.test/r/1", doc, page) as unknown as FakeEl[];
     expect(a!.target).toBeUndefined();
     expect(a!.rel).toBeUndefined();
-    expect(a!.href).toBe("https://form.symval.net/r/1");
+    expect(a!.href).toBe("https://form.example.test/r/1");
   });
   it("origin compares scheme, host and port", () => {
-    expect(sameOrigin("http://form.symval.net/", page)).toBe(false);
-    expect(sameOrigin("https://form.symval.net:8443/", page)).toBe(false);
-    expect(sameOrigin("https://sub.form.symval.net/", page)).toBe(false);
-    expect(sameOrigin("https://FORM.symval.net/x", page)).toBe(true);
-    expect(sameOrigin("https://form.symval.net/", undefined)).toBe(false);
+    expect(sameOrigin("http://form.example.test/", page)).toBe(false);
+    expect(sameOrigin("https://form.example.test:8443/", page)).toBe(false);
+    expect(sameOrigin("https://sub.form.example.test/", page)).toBe(false);
+    expect(sameOrigin("https://form.example.test/x", page)).toBe(true);
+    expect(sameOrigin("https://form.example.test/", undefined)).toBe(false);
   });
 });
