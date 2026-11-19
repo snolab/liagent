@@ -1910,3 +1910,140 @@ describe("preapprove: the host vouches for its own agent (HubOptions.preapproved
     expect((await s.resume(KEY)).closed).toBe(4498);
   });
 });
+
+describe("ChatHub: presence", () => {
+  type Pres = {
+    type: string;
+    node: string;
+    members: { id: string; kind: string; label: string; lane?: string; host?: string }[];
+  };
+  const pres = (ws: FakeSocket) => ws.last("presence") as Pres;
+  const self = (ws: FakeSocket) => (ws.last("state") as { self: string }).self;
+  const agentAt = async (
+    s: ReturnType<typeof setup>,
+    owner: FakeSocket,
+    label: string,
+    node?: string,
+  ) => {
+    const ws = new FakeSocket();
+    s.sockets.push(ws);
+    await s.hub.connectController(
+      ws,
+      new URL(
+        `https://example.com/api/chat/control?label=${encodeURIComponent(label)}&scope=chat${node ? `&node=${node}` : ""}`,
+      ),
+      null,
+    );
+    await s.msg(owner, { type: "allow", pair: s.pairOf(owner) });
+    return ws;
+  };
+
+  it("a page gets a snapshot of the users on its node, itself included", () => {
+    const s = setup();
+    const p1 = s.page("/a phone");
+    expect(pres(p1)).toMatchObject({
+      type: "presence",
+      node: "/",
+      members: [{ id: self(p1), kind: "user", label: "you" }],
+    });
+    const p2 = s.page("/b laptop");
+    // p1 hears p2 join as a delta.
+    expect(p1.last("presence-delta")).toMatchObject({
+      node: "/",
+      join: [{ id: self(p2), kind: "user" }],
+    });
+    expect(
+      pres(p2)
+        .members.map((m) => m.id)
+        .sort(),
+    ).toEqual([self(p1), self(p2)].sort());
+  });
+
+  it("agents show as lane@host with lane and host, scoped by node; node changes snapshot and delta", async () => {
+    const s = setup();
+    const p1 = s.page("/a phone");
+    const p2 = s.page("/b laptop");
+    const root = await agentAt(s, p1, "writer@devbox watching");
+    const deep = await agentAt(s, p1, "[reviewer]@devbox", "/words");
+    expect(root.closed).toBeUndefined();
+    expect(deep.closed).toBeUndefined();
+    // On "/": the root listener only (the /words one does not get root lines).
+    const agentsOf = (
+      ws: FakeSocket,
+      all = [pres(ws), ...ws.sent.filter((m) => m.type === "presence-delta")],
+    ) => {
+      const live = new Map<string, Pres["members"][number]>();
+      for (const f of all as unknown as {
+        type: string;
+        members?: Pres["members"];
+        join?: Pres["members"];
+        leave?: string[];
+      }[]) {
+        if (f.type === "presence") live.clear();
+        for (const m of f.members ?? f.join ?? []) live.set(m.id, m);
+        for (const id of f.leave ?? []) live.delete(id);
+      }
+      return [...live.values()].filter((m) => m.kind === "agent");
+    };
+    expect(agentsOf(p2)).toEqual([
+      expect.objectContaining({ label: "writer@devbox", lane: "writer", host: "devbox" }),
+    ]);
+    await s.msg(p2, { type: "page", node: "/words/prefetch" });
+    const snap = pres(p2);
+    expect(snap.node).toBe("/words/prefetch");
+    expect(
+      snap.members
+        .filter((m) => m.kind === "agent")
+        .map((m) => m.lane)
+        .sort(),
+    ).toEqual(["reviewer", "writer"]);
+    // p2 left "/": p1 hears it leave.
+    expect(p1.last("presence-delta")).toMatchObject({ leave: [self(p2)] });
+    // An agent going away is a delta.
+    s.sockets.splice(s.sockets.indexOf(deep), 1);
+    await s.hub.webSocketClose(deep, 1000);
+    expect(p2.last("presence-delta")).toMatchObject({
+      node: "/words/prefetch",
+      leave: [expect.any(String)],
+    });
+  });
+
+  it("a friend sees only their own thread, never the owner's pages or agents", async () => {
+    const s = setup();
+    const owner = s.page("/a phone");
+    await agentAt(s, owner, "writer@devbox");
+    const f = await s.friend("fa", "a@x.com");
+    expect(pres(f).members).toEqual([{ id: self(f), kind: "user", label: "a@x.com" }]);
+    expect(pres(owner).members.some((m) => m.label === "a@x.com")).toBe(false);
+  });
+
+  it("presenceUser lets a subclass name users (and leave them out)", () => {
+    class Hub extends ChatHub {
+      protected override presenceUser(_ws: Socket, page: { label: string }) {
+        return page.label.startsWith("/hide")
+          ? null
+          : { label: "Ada", avatar: "javascript:alert(1)" };
+      }
+    }
+    const sockets: FakeSocket[] = [];
+    const hub = new Hub(
+      { acceptWebSocket: () => {}, getWebSockets: () => sockets, storage: fakeStorage() },
+      undefined,
+      () => 1,
+      {},
+    );
+    const open = (label: string) => {
+      const ws = new FakeSocket();
+      sockets.push(ws);
+      void hub.connectPage(
+        ws,
+        new URL(`https://example.com/api/chat?label=${encodeURIComponent(label)}`),
+      );
+      return ws;
+    };
+    open("/hide me");
+    const p = open("/x");
+    // The bad avatar is dropped; the hidden page is not listed.
+    expect(pres(p).members).toEqual([{ id: self(p), kind: "user", label: "Ada" }]);
+  });
+});

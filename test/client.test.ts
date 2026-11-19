@@ -179,6 +179,23 @@ describe("hubTransport", () => {
 });
 
 describe("connectHub", () => {
+  it("sends the box's node, routes presence frames to the box, and moves the node on setTarget", () => {
+    const got: unknown[] = [];
+    const box = {
+      target: "/words",
+      presence: (f: unknown) => got.push(f),
+    } as unknown as Parameters<typeof connectHub>[0];
+    const hub = connectHub(box, opts);
+    const ws = FakeWS.all[0]!;
+    expect(new URL(ws.url).searchParams.get("node")).toBe("/words");
+    ws.open();
+    ws.hub({ type: "presence", node: "/words", members: [], at: 1 });
+    expect(got).toEqual([{ type: "presence", node: "/words", members: [], at: 1 }]);
+    box.onTarget!("/other");
+    expect(ws.sent.at(-1)).toEqual({ type: "page", node: "/other" });
+    hub.close();
+    expect(got.at(-1)).toBeNull();
+  });
   it("puts the box on a chat, and wires its callbacks to the chat's actions", () => {
     const box = {} as Parameters<typeof connectHub>[0];
     const hub = connectHub(box, opts);
