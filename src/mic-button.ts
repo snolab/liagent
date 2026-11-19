@@ -54,7 +54,9 @@ import {
   type MicState,
   type MicStatus,
   MIC_ERROR_STRINGS_EN,
+  type StreamStt,
   type SttResult,
+  type TextSource,
   type UploadInfo,
   appendDictation,
   micErrorNote,
@@ -95,14 +97,15 @@ export { type PageAudio, createPageAudio, pageAudio } from "./page-audio.ts";
 /**
  * What the mic types into: `<liagent-chat>` has this shape, and so can any
  * host's own input. The mic reads `draft`, writes the dictated draft with
- * `setDraft(next, { source: "stt" })`, shows partial transcripts with
+ * `setDraft(next, { source: "stt" })` (or `"stream"` for a streaming STT's text, so a host can treat it apart,
+ * e.g. not auto-send it), shows partial transcripts with
  * `setPartial(text)` (null: none left), sends with `submit()` when a spoken
  * sentence is complete (false: it did not go out), and sets `micActive` while
  * it listens (a box should not send by its typing debounce meanwhile).
  */
 export interface DictationTarget {
   readonly draft: string;
-  setDraft(next: string, opts?: { source?: "stt" }): void;
+  setDraft(next: string, opts?: { source?: TextSource }): void;
   setPartial(text: string | null): void;
   submit(): boolean | void;
   micActive: boolean;
@@ -120,10 +123,10 @@ export const isDictationTarget = (x: unknown): x is DictationTarget =>
  * and sent at once when it ends a sentence with words in it. True if it went
  * out.
  */
-export function dictate(box: DictationTarget, text: string): boolean {
+export function dictate(box: DictationTarget, text: string, source: TextSource = "stt"): boolean {
   const r = appendDictation(box.draft ?? "", text);
   if (r.draft === box.draft) return false;
-  box.setDraft(r.draft, { source: "stt" });
+  box.setDraft(r.draft, { source });
   return r.send && box.submit() !== false;
 }
 
@@ -133,6 +136,8 @@ export type SttHandler = (wav: Uint8Array, info: UploadInfo) => Promise<SttResul
 /** What the element hands the page's session (src/mic-session.ts). */
 export type MicConfig = {
   stt?: SttHandler;
+  /** A streaming STT (StreamStt): fed the VAD's frames per utterance; its final covers the utterance. */
+  streamStt?: StreamStt;
   vad?: VadSource;
   aec: boolean;
   onUtterance?: (u: Utterance) => void;
@@ -212,6 +217,7 @@ function browserDeps(storageKey: string, stallMs?: number): MicDeps<MicConfig> {
     load: (ev, s, c) =>
       c?.vad ? sileroVad(ev, s as MediaStream, c.vad) : Promise.reject(new Error("no VAD source")),
     fallback: (ev, s) => energyVad(ev, s as MediaStream),
+    stream: (c) => c?.streamStt,
     upload: async (wav, info, c) => {
       if (!c?.stt) throw new NoStt();
       const r = await c.stt(wav, info);
@@ -321,6 +327,11 @@ export class MicElement extends Base {
   static observedAttributes = ["stt-url", "lang", "vad-src", "ort-src", "aec"];
   /** The host's own STT call (else a POST to stt-url). */
   stt?: SttHandler;
+  /**
+   * A streaming STT (StreamStt, src/mic.ts): opened per utterance and fed the VAD's frames; its final covers the
+   * utterance (no upload), and its text reaches setDraft with source "stream". The batch STT stays the fallback.
+   */
+  streamStt?: StreamStt;
   sttHeaders?: Record<string, string>;
   sttCredentials?: RequestCredentials;
   /** Silero VAD's source (else vad-src/ort-src; else the energy gate). */
@@ -428,6 +439,7 @@ export class MicElement extends Base {
     const vadSrc = this.getAttribute("vad-src");
     const ortSrc = this.getAttribute("ort-src");
     return {
+      streamStt: this.streamStt,
       stt:
         this.stt ??
         (url
@@ -465,7 +477,7 @@ export class MicElement extends Base {
     this.off.push(
       s.subscribe((v) => this.render(v)),
       s.attach({
-        onText: (text) => this.onText(text),
+        onText: (text, source) => this.onText(text, source),
         onPending: (n, interim) => this.box?.setPartial(n > 0 && interim ? interim : null),
       }),
     );
@@ -526,10 +538,10 @@ export class MicElement extends Base {
     );
   }
 
-  private onText(text: string) {
-    if (!this.fire("mic-text", { text }, true)) return;
+  private onText(text: string, source: TextSource = "stt") {
+    if (!this.fire("mic-text", { text, source }, true)) return;
     const box = this.box;
-    if (!box || !dictate(box, text)) return;
+    if (!box || !dictate(box, text, source)) return;
     this.fire("mic-sent", { text });
     // Sent: an interruption (the user talking, typing) is over, and the reading goes on.
     this._session?.voice()?.resume?.();
