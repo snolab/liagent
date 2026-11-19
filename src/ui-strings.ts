@@ -82,6 +82,8 @@ export type UiStrings = {
   nodesLabel: string;
   /** The × on the aimed node. */
   toMainThread: string;
+  /** The presence strip's aria-label prefix and the list's heading. */
+  presenceHere: string;
   /** Status. */
   statusUnavailable: string;
   /** Status. */
@@ -224,6 +226,7 @@ export const UI_EN: UiStrings = {
   asksLabel: "Agent connections",
   nodesLabel: "Nodes to address",
   toMainThread: "Send to the main thread instead",
+  presenceHere: "Also here",
   statusUnavailable: "chat unavailable",
   statusNotConnected: "not connected — your draft is kept",
   statusReconnecting: "reconnecting…",
@@ -317,6 +320,7 @@ export const UI_ZH: UiStrings = {
   asksLabel: "agent 连接",
   nodesLabel: "可发送的节点",
   toMainThread: "改发到主线程",
+  presenceHere: "也在这里",
   statusUnavailable: "聊天不可用",
   statusNotConnected: "未连接，草稿已保留",
   statusReconnecting: "重新连接中…",
@@ -433,6 +437,7 @@ export const UI_JA: UiStrings = {
   asksLabel: "エージェントの接続",
   nodesLabel: "宛先のノード",
   toMainThread: "代わりにメインスレッドへ送る",
+  presenceHere: "ここにいる人",
   statusUnavailable: "チャットを使えません",
   statusNotConnected: "未接続 — 下書きは残っています",
   statusReconnecting: "再接続中…",
