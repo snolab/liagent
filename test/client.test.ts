@@ -179,6 +179,17 @@ describe("hubTransport", () => {
 });
 
 describe("connectHub", () => {
+  it("keeps a target chosen while the socket is still connecting", () => {
+    const target = { target: "/words", presence() {} };
+    const box = target as unknown as Parameters<typeof connectHub>[0];
+    const hub = connectHub(box, opts);
+    const ws = FakeWS.all[0]!;
+    target.target = "/reader";
+    box.onTarget!(target.target);
+    ws.open();
+    hub.close();
+    expect(ws.sent).toContainEqual({ type: "page", node: "/reader" });
+  });
   it("sends the box's node, routes presence frames to the box, and moves the node on setTarget", () => {
     const got: unknown[] = [];
     const box = {

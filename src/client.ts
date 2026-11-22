@@ -155,12 +155,16 @@ export function hubTransport(opts: HubOptions): Transport {
   const connect = () => {
     if (ws) return;
     const label = (sentLabel = pageLabel());
-    const sock = new WebSocket(socketUrl(opts.url, label, opts.node?.() ?? "/"));
+    const initialNode = opts.node?.() ?? "/";
+    const sock = new WebSocket(socketUrl(opts.url, label, initialNode));
     ws = sock;
     sink?.status("connecting");
     sock.onopen = () => {
+      if (ws !== sock) return;
       opened.add(sock);
-      if (ws === sock) sink?.status("live");
+      const latestNode = opts.node?.() ?? "/";
+      if (latestNode !== initialNode) send(sock, { type: "page", node: latestNode });
+      sink?.status("live");
     };
     sock.onmessage = (e) => {
       if (ws !== sock) return;
