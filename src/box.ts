@@ -595,10 +595,10 @@ textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent
 .box.typing .attached { border-radius: 0; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
 .attached .what { flex: 1; min-width: 0; }
 .attached .x { all: unset; cursor: pointer; flex: none; padding: 0 6px; color: var(--muted); font-size: 13px; line-height: 1.35; }
-.ctx { all: unset; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; min-width: 1.4em; height: 1.4em; margin-inline-end: 4px; border-radius: 999px; font-size: 11px; line-height: 1; vertical-align: middle; background: color-mix(in oklch, var(--accent) 14%, transparent); }
+.ctx { all: unset; pointer-events: auto; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; min-width: 1.4em; height: 1.4em; margin-inline-end: 4px; border-radius: 999px; font-size: 11px; line-height: 1; vertical-align: middle; background: color-mix(in oklch, var(--accent) 14%, transparent); }
 .ctx:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ctx[aria-expanded="true"] { background: color-mix(in oklch, var(--accent) 28%, transparent); }
-.ctx-detail { margin: 2px 0; padding: 2px 6px; border-inline-start: 2px solid color-mix(in oklch, var(--accent) 75%, transparent); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 10rem; overflow-y: auto; }
+.ctx-detail { pointer-events: auto; margin: 2px 0; padding: 2px 6px; border-inline-start: 2px solid color-mix(in oklch, var(--accent) 75%, transparent); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 10rem; overflow-y: auto; }
 .ctx-detail .ctx-title { font-weight: 600; }
 .quote, .attached .q {
   all: unset; display: block; min-width: 0; max-width: 100%; cursor: pointer; pointer-events: auto;
