@@ -110,6 +110,16 @@
 //     { text, to, source, context, attachments, extra }. Listeners add fields
 //     to detail.extra (they go out as the line's `ctx`); preventDefault()
 //     keeps the draft unsent. See src/before-send.ts.
+//   - Presence (part="presence"): who else is on the box's node, from the
+//     hub's {type:"presence"} snapshot and {type:"presence-delta"} frames
+//     (box.presence(frame); connectHub feeds it and tells the hub the node
+//     via onTarget). A strip centred just above the input row: at most 3
+//     stacked 18px avatars (an agent without a picture gets its lane's
+//     letters), then "+N" only past 3. Hover or focus previews up to 8 with
+//     names and [lane@host]; a click (Enter/Space) opens the whole list as a
+//     menu (Esc or an outside tap closes it). The page itself is left out
+//     (box.self); hidden when no one else is here; reset on a node change.
+//     Text via textContent only; avatar URLs must be https: or data:image.
 //   - Channels: box.channelOf = (m) => ({ label, color } | null) puts a
 //     【label】 tag before each history line (text only; the colour, a CSS
 //     colour, goes on the tag text with a faint same-colour background, set
@@ -187,6 +197,18 @@ import {
 } from "./protocol.ts";
 import { type Chat, type ChatState, createChat } from "./core.ts";
 import { pageHint, when } from "./format.ts";
+import { cleanAvatarUrl, type PresenceDelta, type PresenceFrame } from "./protocol.ts";
+import {
+  type PresenceMember,
+  type PresenceState,
+  applyPresence,
+  badgeText,
+  emptyPresence,
+  laneTag,
+  memberLabel,
+  presenceAria,
+  presenceView,
+} from "./presence.ts";
 import { beforeSendEvent } from "./before-send.ts";
 export type { BeforeSendDetail } from "./before-send.ts";
 import {
@@ -668,6 +690,21 @@ textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent
 @keyframes drain { to { transform: scaleX(0); } }
 .aim { position: absolute; inset-inline-start: 84px; bottom: 100%; margin-bottom: 4px; max-width: calc(100% - 6rem); display: flex; flex-direction: column; align-items: flex-start; gap: 4px; pointer-events: none; }
 .aim > * { pointer-events: auto; }
+.presence { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); margin-bottom: 4px; z-index: 2; display: flex; flex-direction: column-reverse; align-items: center; pointer-events: auto; }
+.presence[hidden] { display: none; }
+.presence .pstack { display: inline-flex; align-items: center; padding: 2px 4px; border-radius: 12px; background: var(--glass); border: 1px solid var(--line); cursor: pointer; }
+.presence .pstack > .pav + .pav { margin-inline-start: -6px; }
+.presence .pstack:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
+.pav { width: 18px; height: 18px; flex: none; border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 600; line-height: 1; background: var(--pav-bg, #888); color: var(--pav-fg, #fff); box-shadow: 0 0 0 1.5px var(--glass, #fff); }
+.pav.agent { border-radius: 5px; }
+.pav img { width: 100%; height: 100%; object-fit: cover; }
+.pmore { margin-inline-start: 4px; font-size: 11px; font-variant-numeric: tabular-nums; opacity: .8; }
+.ppeek { list-style: none; margin: 0 0 4px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--glass); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); text-shadow: none; display: flex; flex-direction: column; gap: 3px; max-width: 16rem; }
+.ppeek[hidden] { display: none; }
+.prow { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+.prow .pname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prow .ptag { opacity: .65; white-space: nowrap; }
+.menu.plist { left: 50%; transform: translateX(-50%); margin-bottom: 30px; max-height: 40vh; }
 .target { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; border: 1px solid var(--node, var(--line)); border-radius: 999px; padding: 0 6px; font-size: 10px; line-height: 16px; background: var(--glass); }
 .target.preview { opacity: .7; }
 .target button { all: unset; cursor: pointer; line-height: 1; }
@@ -736,7 +773,7 @@ ${TREE_CHIPS_CSS}
 [hidden] { display: none !important; }
 `;
 
-type Panel = "none" | "menu" | "tree" | "plus" | "files";
+type Panel = "none" | "menu" | "tree" | "plus" | "files" | "presence";
 /** Where the slotted mic goes (attribute mic-placement). */
 export type MicPlacement = "trailing" | "leading" | "inside" | "hidden";
 /** Where the tree button goes (attribute tree-placement). */
@@ -796,6 +833,8 @@ type Els = Record<
   | "asks"
   | "rowbox"
   | "aim"
+  | "presence"
+  | "plist"
   | "bar"
   | "mark"
   | "dot"
@@ -871,6 +910,8 @@ export class ChatBox extends Base {
   onEnd?: (s: PairInfo) => void;
   /** End was pressed (and, for this page, confirmed) on one of the user's pages in the menu. */
   onEndPage?: (id: string) => void;
+  /** The box aims at another node (setTarget, "@/…", ×): connectHub tells the hub, for presence. */
+  onTarget?: (node: string) => void;
   /**
    * The host's avatar for a line that is not the agent's: its pictures are
    * tried first, its name and id fill in. Return nothing to use the line's
@@ -927,6 +968,8 @@ export class ChatBox extends Base {
   private _nodes: string[] = [];
   /** The node the next line goes to ("/" = the main thread, no chip). */
   private _target = ROOT_NODE;
+  private _presence: PresenceState = emptyPresence(ROOT_NODE);
+  private _presenceHover = false;
   /** Polished lines shown as first heard (their mark tapped). */
   private rawIds = new Set<string>();
   /** The host's actions (+ menu items and bar buttons). */
@@ -1074,6 +1117,7 @@ export class ChatBox extends Base {
     if (changed("pending") || changed("pages") || changed("self") || changed("friend"))
       this.renderAsks();
     if (changed("sessions") || changed("pages") || changed("self")) this.renderMenu();
+    if (changed("self")) this.renderPresence();
     if (changed("busy")) this.renderBusy();
     if (changed("notice") || changed("warning")) this.renderInput();
   }
@@ -1120,9 +1164,34 @@ export class ChatBox extends Base {
   }
   /** Address the next lines to a state-tree node ("/" = back to the main thread). */
   setTarget(path: string) {
+    const was = this._target;
     this._target = nodePath(path) ?? ROOT_NODE;
+    if (this._target !== was) {
+      // Another node: its presence comes fresh from the hub.
+      this._presence = emptyPresence(this._target);
+      if (this.panel === "presence") this.setPanel("none");
+      this.renderPresence();
+      this.onTarget?.(this._target);
+    }
     this.renderAim();
     this.renderPlaceholder();
+  }
+  /**
+   * The hub's presence frame for this box's node (a snapshot replaces the
+   * list, a delta merges; another node's is ignored); null clears it.
+   * Frames should come through parsePresence (connectHub does that).
+   */
+  presence(frame: PresenceFrame | PresenceDelta | null) {
+    this._presence = frame ? applyPresence(this._presence, frame) : emptyPresence(this._target);
+    this.renderPresence();
+  }
+  /** Who else is on the node now (this page left out). */
+  get present(): PresenceMember[] {
+    return presenceView(this._presence.members, this._self).all;
+  }
+  /** Whether the strip shows its hover/focus preview. */
+  get presenceExpanded(): boolean {
+    return this._presenceHover;
   }
   /** Agents listening now (shown in the status). */
   set listeners(v: number) {
@@ -1932,9 +2001,11 @@ export class ChatBox extends Base {
 
   /** A tap anywhere outside the menu and the mark closes the menu. */
   private outside = (e: Event) => {
-    if (this.panel !== "menu" && this.panel !== "plus" && this.panel !== "files") return;
+    if (this.panel === "none" || this.panel === "tree") return;
     const path = e.composedPath();
-    if (this.panel === "files") {
+    if (this.panel === "presence") {
+      if (path.includes(this.els.plist!) || path.includes(this.els.presence!)) return;
+    } else if (this.panel === "files") {
       if (path.includes(this.els.fpanel!) || path.includes(this.els.plus!)) return;
     } else if (this.panel === "plus") {
       if (path.includes(this.els.amenu!) || path.includes(this.els.plus!)) return;
@@ -1989,6 +2060,8 @@ export class ChatBox extends Base {
   <div class="filerow" id="filerow" hidden></div>
   <div class="rowbox" id="rowbox">
     <div class="aim" id="aim" hidden></div>
+    <div class="presence" id="presence" part="presence" hidden></div>
+    <div class="menu plist" id="plist" role="menu" hidden></div>
     <div class="bar" id="bar" part="bar">
       <button type="button" class="tap mark" id="mark" title="${this.ui.markHint}">${ICONS.mark}<span class="dot" id="dot"></span></button>
       <div class="cell" id="lead"></div>
@@ -2735,6 +2808,124 @@ export class ChatBox extends Base {
     aim.hidden = !this.open || !aim.childElementCount;
   }
 
+  /** One small avatar: the picture (checked again), or an initial / lane badge on its colour. */
+  private presenceAvatar(m: PresenceMember): HTMLElement {
+    const el = document.createElement("span");
+    el.className = `pav ${m.kind}`;
+    const badge = () => {
+      const c = avatarColors(`${m.kind}:${m.lane || m.id}`);
+      el.replaceChildren();
+      el.textContent = badgeText(m);
+      el.style.setProperty("--pav-bg", c.bg);
+      el.style.setProperty("--pav-fg", c.fg);
+    };
+    const src = cleanAvatarUrl(m.avatar);
+    if (src) {
+      const img = document.createElement("img");
+      img.alt = "";
+      img.referrerPolicy = "no-referrer";
+      img.decoding = "async";
+      img.addEventListener("error", badge, { once: true });
+      img.src = src;
+      el.append(img);
+    } else badge();
+    return el;
+  }
+  /** A list row: avatar, label, and [lane@host] for an agent. */
+  private presenceRow(m: PresenceMember, item: boolean): HTMLElement {
+    const row = document.createElement(item ? "div" : "li");
+    if (item) {
+      row.setAttribute("role", "menuitem");
+      row.tabIndex = 0;
+    }
+    row.className = "prow";
+    const name = document.createElement("span");
+    name.className = "pname";
+    const tag = laneTag(m);
+    name.textContent = tag && (m.label === tag.slice(1, -1) || m.label === m.lane) ? "" : m.label;
+    row.append(this.presenceAvatar(m), name);
+    if (tag) {
+      const t = document.createElement("span");
+      t.className = "ptag";
+      t.textContent = tag;
+      row.append(t);
+    }
+    return row;
+  }
+  /**
+   * The presence strip (part="presence"), centred above the input row:
+   * up to 3 stacked avatars, "+N" past 3, a preview of up to 8 on hover or
+   * focus, and on click the whole list as a menu. Hidden when no one else is here.
+   */
+  private renderPresence() {
+    const strip = this.els.presence;
+    const list = this.els.plist;
+    if (!strip || !list) return;
+    const v = presenceView(this._presence.members, this._self);
+    strip.hidden = v.hidden;
+    list.hidden = v.hidden || this.panel !== "presence";
+    if (v.hidden) {
+      this._presenceHover = false;
+      strip.replaceChildren();
+      list.replaceChildren();
+      if (this.panel === "presence") this.panel = "none";
+      return;
+    }
+    let btn = strip.querySelector<HTMLButtonElement>("button.pstack");
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "pstack";
+      btn.setAttribute("aria-haspopup", "menu");
+      const set = (on: boolean) => {
+        if (this._presenceHover === on) return;
+        this._presenceHover = on;
+        this.renderPresence();
+      };
+      strip.addEventListener("pointerenter", () => set(true));
+      strip.addEventListener("pointerleave", () => set(false));
+      strip.addEventListener("focusin", () => set(true));
+      strip.addEventListener("focusout", (e) => {
+        if (!strip.contains((e as FocusEvent).relatedTarget as Node | null)) set(false);
+      });
+      btn.addEventListener("click", () =>
+        this.setPanel(this.panel === "presence" ? "none" : "presence"),
+      );
+      strip.append(btn);
+    }
+    const peek = (() => {
+      let p = strip.querySelector<HTMLElement>("ul.ppeek");
+      if (!p) {
+        p = document.createElement("ul");
+        p.className = "ppeek";
+        p.setAttribute("aria-hidden", "true");
+        strip.append(p);
+      }
+      return p;
+    })();
+    btn.setAttribute("aria-label", presenceAria(v.all, this.ui.presenceHere));
+    btn.title = v.all.map(memberLabel).join("\n");
+    btn.setAttribute("aria-expanded", String(this.panel === "presence"));
+    btn.replaceChildren(...v.stack.map((m) => this.presenceAvatar(m)));
+    if (v.more) {
+      const more = document.createElement("span");
+      more.className = "pmore";
+      more.textContent = `+${v.more}`;
+      btn.append(more);
+    }
+    const showPeek = this._presenceHover && this.panel !== "presence";
+    peek.hidden = !showPeek;
+    peek.replaceChildren(...(showPeek ? v.preview.map((m) => this.presenceRow(m, false)) : []));
+    strip.classList.toggle("expanded", showPeek);
+    if (!list.hidden) {
+      const head = document.createElement("span");
+      head.className = "head";
+      head.textContent = `${this.ui.presenceHere} · ${v.all.length}`;
+      list.setAttribute("aria-label", this.ui.presenceHere);
+      list.replaceChildren(head, ...v.all.map((m) => this.presenceRow(m, true)));
+    } else list.replaceChildren();
+  }
+
   // ---- open, minimized, panels ------------------------------------------------
 
   private setOpen(v: boolean) {
@@ -2755,6 +2946,7 @@ export class ChatBox extends Base {
     this.renderMenu();
     this.renderActions();
     this.renderFileList();
+    this.renderPresence();
     if (opening && this.open) this.els.column!.scrollTop = 0;
     requestAnimationFrame?.(() => this.fit());
   }
@@ -2783,6 +2975,7 @@ export class ChatBox extends Base {
     this.renderLog();
     this.renderInput();
     this.renderAim();
+    this.renderPresence();
     this.renderPlaceholder();
     this.renderPartial();
     this.renderTree();
