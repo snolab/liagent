@@ -97,7 +97,7 @@ describe("linkify: same host vs external", () => {
     expect(sameOrigin("http://form.example.test/", page)).toBe(false);
     expect(sameOrigin("https://form.example.test:8443/", page)).toBe(false);
     expect(sameOrigin("https://sub.form.example.test/", page)).toBe(false);
-    expect(sameOrigin("https://form.example.test/x", page)).toBe(true);
+    expect(sameOrigin("https://FORM.example.test/x", page)).toBe(true);
     expect(sameOrigin("https://form.example.test/", undefined)).toBe(false);
   });
 });
