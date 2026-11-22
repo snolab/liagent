@@ -60,6 +60,8 @@ export type UiStrings = {
   echoOff: string;
   /** The empty log's hint ({s}: seconds). */
   hintType: string;
+  /** The log's hint when a channel filter hides every line ({c}: the channel). */
+  hintFiltered: string;
   /** The input's placeholder while the mark is held. */
   dragHint: string;
   /** Placeholder when a node is aimed at. */
@@ -212,6 +214,7 @@ export const UI_EN: UiStrings = {
   echoOn: "Echo cancellation on",
   echoOff: "Echo cancellation off",
   hintType: "Type here; it is sent {s} s after you stop.",
+  hintFiltered: "No lines in {c} yet. A channel filter is on.",
   dragHint: "drag: move · tap: minimize · double-tap: menu",
   messageNode: "Message {node}…",
   messageAgent: "Message the agent…",
@@ -306,6 +309,7 @@ export const UI_ZH: UiStrings = {
   echoOn: "回声消除：开",
   echoOff: "回声消除：关",
   hintType: "在这里输入，停止输入 {s} 秒后自动发送。",
+  hintFiltered: "{c} 频道还没有消息。已开启频道筛选。",
   dragHint: "拖动：移动 · 轻点：最小化 · 双击：菜单",
   messageNode: "发给 {node}…",
   messageAgent: "给 agent 发消息…",
@@ -421,6 +425,7 @@ export const UI_JA: UiStrings = {
   echoOn: "エコーキャンセル：オン",
   echoOff: "エコーキャンセル：オフ",
   hintType: "ここに入力すると、入力をやめて {s} 秒後に送信されます。",
+  hintFiltered: "{c} チャンネルにはまだ行がありません。チャンネルの絞り込みがオンです。",
   dragHint: "ドラッグ：移動 · タップ：最小化 · ダブルタップ：メニュー",
   messageNode: "{node} にメッセージ…",
   messageAgent: "エージェントにメッセージ…",

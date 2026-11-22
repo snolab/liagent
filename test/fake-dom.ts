@@ -111,6 +111,7 @@ export class FakeEl {
 export const fakeDocument = {
   createElement: (tag: string) => new FakeEl(tag),
   createTextNode: (data: string) => new FakeText(data),
+  documentElement: { lang: "en" },
   defaultView: { location: { origin: "https://page.example.test" } },
 };
 
