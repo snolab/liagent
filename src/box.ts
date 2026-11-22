@@ -432,7 +432,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 /* While the box is in use the history takes the wheel (its gaps too); at rest
    only the lines do, so the empty space stays click-through. */
 .box:focus-within .column, .box.on .column, .box.typing .column { pointer-events: auto; }
-.log li { pointer-events: auto; }
+.box:focus-within .log li, .box.on .log li, .box.typing .log li { pointer-events: auto; }
 .column::-webkit-scrollbar { display: none; }
 .column.wide { max-height: var(--liagent-log-max-wide, 30vh); }
 .column.fade { -webkit-mask-image: linear-gradient(to bottom, transparent, black .9rem); mask-image: linear-gradient(to bottom, transparent, black .9rem); }
@@ -447,7 +447,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .blink { animation: blink 1.6s ease-in-out infinite; }
 @keyframes blink { 50% { opacity: .35; } }
 .log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-:host(:not(:focus-within)) .log li.older { display: none; }
+/* collapsed-count: older lines hide at rest; in use (focus, a mic, an open panel) they show. */
+:host(:not(:focus-within)) .box:not(.on):not(.typing) .log li.older { display: none; }
 .log li { display: flex; align-items: flex-start; gap: 6px; }
 .text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding-top: 1px; }
 .text a { pointer-events: auto; color: inherit; text-decoration: underline; }
@@ -745,6 +746,35 @@ export function wheelScrolls(
   if (dy < 0) return el.scrollTop > 0;
   if (dy > 0) return el.scrollTop + el.clientHeight < el.scrollHeight - 1;
   return false;
+}
+/**
+ * The wheel over the bar, outside the input: the pixels the history takes, or
+ * 0 to leave the event alone. The input's own listener already handles a wheel
+ * that starts in it (and hands the rest to the log), and a pinch (ctrlKey) or
+ * a mostly horizontal wheel is never the history's.
+ */
+export function barWheel(
+  e: {
+    deltaX: number;
+    deltaY: number;
+    deltaMode: number;
+    ctrlKey: boolean;
+    defaultPrevented: boolean;
+  },
+  inInput: boolean,
+  column: { scrollTop: number; scrollHeight: number; clientHeight: number },
+): number {
+  if (e.defaultPrevented || inInput || e.ctrlKey) return 0;
+  if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return 0;
+  const px = wheelPixels(e.deltaY, e.deltaMode, column.clientHeight);
+  return wheelScrolls(column, px) ? px : 0;
+}
+/**
+ * collapsed-count: how many of `total` lines (the ones the log shows) are
+ * older than the last `keep`, so hidden while the box is not in use.
+ */
+export function olderLines(total: number, keep: number): number {
+  return keep > 0 ? Math.max(0, total - keep) : 0;
 }
 /** The shadow root's parts, by id. */
 type Els = Record<
@@ -1195,8 +1225,9 @@ export class ChatBox extends Base {
     this.setAttribute("mic-placement", v);
   }
   /**
-   * While focus is outside the box, show only the last N lines; focusing it
-   * (focus-within) shows the full log. 0 / unset = always the full log.
+   * While the box is not in use, show only the last N lines; focus inside it,
+   * a mic on (micActive) or an open panel shows the full log. 0 / unset =
+   * always the full log.
    * Attribute: collapsed-count.
    */
   get collapsedCount(): number {
@@ -1998,17 +2029,17 @@ export class ChatBox extends Base {
     column.addEventListener("mousedown", (e) => {
       if ((e.target as Element | null)?.closest?.("a[href]")) e.preventDefault();
     });
-    // The wheel over the bar scrolls the history first (the input keeps its
-    // own wheel while it can still scroll); at the history's end it goes on
-    // to the page.
+    // The wheel over the bar scrolls the history first (the input has its
+    // own listener, swipeScrollsLog); at the history's end it goes on to the
+    // page.
     bar.addEventListener(
       "wheel",
       (e) => {
-        const ta = this.els.input as HTMLTextAreaElement | undefined;
-        if (ta && e.composedPath().includes(ta) && wheelScrolls(ta, e.deltaY)) return;
-        if (!wheelScrolls(column, e.deltaY)) return;
+        const ta = this.els.input;
+        const px = barWheel(e, !!ta && e.composedPath().includes(ta), column);
+        if (!px) return;
         e.preventDefault();
-        column.scrollTop += e.deltaY;
+        column.scrollTop += px;
         userScroll();
       },
       { passive: false },
@@ -2737,8 +2768,12 @@ export class ChatBox extends Base {
     // Reflected on the host so the page can style around it: [open] or [min].
     this.toggleAttribute("open", this.open);
     this.toggleAttribute("min", !this.open);
+    const wasOn = box.classList.contains("on");
     box.classList.toggle("on", this._micActive || this.panel !== "none");
     box.classList.toggle("typing", this.typing && this.open);
+    // collapsed-count: older lines show or hide with "on"; stay at the log's end.
+    if (wasOn !== box.classList.contains("on") && this.collapsedCount && this.atEnd)
+      requestAnimationFrame(() => this.toEnd());
     this.renderAttached();
     this.renderFiles();
     column.hidden = !this.open;
@@ -3024,8 +3059,7 @@ export class ChatBox extends Base {
     }
     // A game-style log: one line per message, avatar then text, no bubbles;
     // the time only on hover (long press on a phone).
-    const keep = this.collapsedCount;
-    const older = keep ? this._messages.length - keep : 0;
+    const older = olderLines(this._messages.length, this.collapsedCount);
     for (const [i, m] of this._messages.entries()) {
       const li = document.createElement("li");
       if (i < older) li.classList.add("older");

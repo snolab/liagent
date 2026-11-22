@@ -36,7 +36,16 @@ describe("box CSS", () => {
     expect(src).toContain(
       ".box:focus-within .column, .box.on .column, .box.typing .column { pointer-events: auto; }",
     );
-    expect(src).toContain(".log li { pointer-events: auto; }");
+    // The lines take the pointer only in use; at rest the log stays click-through.
+    expect(src).toContain(
+      ".box:focus-within .log li, .box.on .log li, .box.typing .log li { pointer-events: auto; }",
+    );
+    expect(src).not.toMatch(/^\.log li \{ pointer-events: auto; \}/m);
+  });
+  it("collapsed-count hides older lines only at rest (no focus, mic or open panel)", () => {
+    expect(src).toContain(
+      ":host(:not(:focus-within)) .box:not(.on):not(.typing) .log li.older { display: none; }",
+    );
   });
   it("the input keeps the wheel only while it can still scroll", () => {
     const el = (top: number) => ({ scrollTop: top, scrollHeight: 200, clientHeight: 100 });
