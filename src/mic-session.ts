@@ -266,11 +266,16 @@ export function createMicSession<C = unknown>(
       : undefined,
     upload: async (wav, info) => {
       const text = await deps.upload(wav, info, cfg);
+      if (!info.partial) return text;
+      const echo = text && voice?.echoCheck ? voice.echoCheck(text, info.durationMs) : undefined;
+      return echo?.drop ? "" : text;
+    },
+    finalize: (text, wav, info) => {
       // The text guard: the agent's own words that leaked past the echo canceller are dropped.
       const echo = text && voice?.echoCheck ? voice.echoCheck(text, info.durationMs) : undefined;
-      if (!info.partial) deps.onUtterance?.({ ...info, wav, text, echo }, cfg);
+      deps.onUtterance?.({ ...info, wav, text, echo }, cfg);
       if (echo?.drop) {
-        if (!info.partial) voice?.echoDropped?.();
+        voice?.echoDropped?.();
         return "";
       }
       return text;

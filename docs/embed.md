@@ -970,7 +970,12 @@ mic.streamStt = {
 - `onPartial(text)` shows dimmed, as the batch partials do. No batch partials
   are sent while a stream runs.
 - `onFinal(text)` covers the utterance: it is not uploaded, and no pending
-  mark is left. Calls after the first are ignored.
+  mark is left. Calls after the first are ignored. An early final waits for
+  the VAD's complete recording; it passes the same echo check and
+  `onUtterance` callback as a batch result before reaching the input.
+- Up to one second of frames heard before the VAD declares speech is fed
+  first, so the detector's start threshold does not cut the opening sound.
+  A hold, misfire or mic-off clears this buffer.
 - No final within `STREAM_FINAL_MS` (8 s) of the end, or `open`/`send`
   throwing: that utterance is uploaded to the STT endpoint as usual. A misfire,
   the agent starting to speak, or the mic going off calls `abort()`.
