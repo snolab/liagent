@@ -98,9 +98,10 @@ describe("box.channelOf / box.channelFilter", () => {
     Object.getOwnPropertyDescriptor(ChatBox.prototype, k)!.set!.call(self, v);
   const get = (k: string, self: object) =>
     Object.getOwnPropertyDescriptor(ChatBox.prototype, k)!.get!.call(self);
-  it("setting either re-renders the log; non-values become null", () => {
+  it("setting either re-renders the log and the floating lines; non-values become null", () => {
     let n = 0;
-    const self = { renderLog: () => n++ };
+    let f = 0;
+    const self = { renderLog: () => n++, refilterFloats: () => f++ };
     set("channelOf", self, of);
     expect(get("channelOf", self)).toBe(of);
     set("channelFilter", self, "分支");
@@ -110,5 +111,6 @@ describe("box.channelOf / box.channelFilter", () => {
     set("channelFilter", self, undefined);
     expect(get("channelFilter", self)).toBeNull();
     expect(n).toBe(4);
+    expect(f).toBe(4);
   });
 });

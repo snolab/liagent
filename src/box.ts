@@ -439,6 +439,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   max-height: var(--liagent-log-max, 4.4rem); min-height: 3rem; overflow-y: auto; padding: 6px 8px;
   scrollbar-width: none; transition: max-height .15s ease-out;
 }
+/* While the box is in use the history takes the wheel (its gaps too); at rest
+   only the lines do, so the empty space stays click-through. */
+.box:focus-within .column, .box.on .column, .box.typing .column { pointer-events: auto; }
+.box:focus-within .log li, .box.on .log li, .box.typing .log li { pointer-events: auto; }
 .column::-webkit-scrollbar { display: none; }
 .column.wide { max-height: var(--liagent-log-max-wide, 30vh); }
 .column.fade { -webkit-mask-image: linear-gradient(to bottom, transparent, black .9rem); mask-image: linear-gradient(to bottom, transparent, black .9rem); }
@@ -453,6 +457,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .blink { animation: blink 1.6s ease-in-out infinite; }
 @keyframes blink { 50% { opacity: .35; } }
 .log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+/* collapsed-count: older lines hide at rest; in use (focus, a mic, an open panel) they show. */
+:host(:not(:focus-within)) .box:not(.on):not(.typing) .log li.older { display: none; }
 .log li { display: flex; align-items: flex-start; gap: 6px; }
 .text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding-top: 1px; }
 .text a { pointer-events: auto; color: inherit; text-decoration: underline; }
@@ -461,7 +467,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .polished[aria-pressed="true"] { opacity: .9; }
 .raw { opacity: .65; }
 .log li.node { border-inline-start: 2px solid var(--node); padding-inline-start: 4px; }
-.log .channel { color: var(--channel, currentColor); background: color-mix(in srgb, var(--channel, currentColor) 14%, transparent); border-radius: 3px; font-weight: 600; margin-inline-end: 2px; }
+.log .channel, .float .channel { color: var(--channel, currentColor); background: color-mix(in srgb, var(--channel, currentColor) 14%, transparent); border-radius: 3px; font-weight: 600; margin-inline-end: 2px; }
 .log .sub { display: block; font-size: 10px; line-height: 1.2; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Fixed size whatever loads, so a late picture shifts nothing. */
 .av {
@@ -743,6 +749,44 @@ function iconNode(icon: string | Node | undefined, fallback: string): Node {
   return document.createTextNode(icon || fallback);
 }
 const keepFocus = (e: Event) => e.preventDefault();
+/** True when `el` can still scroll by `dy` (so the wheel is its own). */
+export function wheelScrolls(
+  el: { scrollTop: number; scrollHeight: number; clientHeight: number },
+  dy: number,
+): boolean {
+  if (dy < 0) return el.scrollTop > 0;
+  if (dy > 0) return el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+  return false;
+}
+/**
+ * The wheel over the bar, outside the input: the pixels the history takes, or
+ * 0 to leave the event alone. The input's own listener already handles a wheel
+ * that starts in it (and hands the rest to the log), and a pinch (ctrlKey) or
+ * a mostly horizontal wheel is never the history's.
+ */
+export function barWheel(
+  e: {
+    deltaX: number;
+    deltaY: number;
+    deltaMode: number;
+    ctrlKey: boolean;
+    defaultPrevented: boolean;
+  },
+  inInput: boolean,
+  column: { scrollTop: number; scrollHeight: number; clientHeight: number },
+): number {
+  if (e.defaultPrevented || inInput || e.ctrlKey) return 0;
+  if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return 0;
+  const px = wheelPixels(e.deltaY, e.deltaMode, column.clientHeight);
+  return wheelScrolls(column, px) ? px : 0;
+}
+/**
+ * collapsed-count: how many of `total` lines (the ones the log shows) are
+ * older than the last `keep`, so hidden while the box is not in use.
+ */
+export function olderLines(total: number, keep: number): number {
+  return keep > 0 ? Math.max(0, total - keep) : 0;
+}
 /** The shadow root's parts, by id. */
 type Els = Record<
   | "box"
@@ -792,7 +836,15 @@ type FloatLife = ReturnType<typeof createFloatLife>;
 /** The chat box element. Plain properties in, callbacks out; see the file header. */
 export class ChatBox extends Base {
   static get observedAttributes() {
-    return ["mic-active", "hold", "mic-placement", "tree-placement", "all-pages", "no-echo-toggle"];
+    return [
+      "mic-active",
+      "hold",
+      "mic-placement",
+      "tree-placement",
+      "all-pages",
+      "no-echo-toggle",
+      "collapsed-count",
+    ];
   }
   /**
    * Called with each draft that goes out, and the state-tree node it is
@@ -1185,6 +1237,20 @@ export class ChatBox extends Base {
   set micPlacement(v: MicPlacement) {
     this.setAttribute("mic-placement", v);
   }
+  /**
+   * While the box is not in use, show only the last N lines; focus inside it,
+   * a mic on (micActive) or an open panel shows the full log. 0 / unset =
+   * always the full log.
+   * Attribute: collapsed-count.
+   */
+  get collapsedCount(): number {
+    const n = Number(this.getAttribute?.("collapsed-count"));
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  }
+  set collapsedCount(v: number) {
+    if (v > 0) this.setAttribute("collapsed-count", String(Math.floor(v)));
+    else this.removeAttribute("collapsed-count");
+  }
   /** Where the tree button goes. Attribute: tree-placement. */
   get treePlacement(): TreePlacement {
     const v = this.getAttribute?.("tree-placement") as TreePlacement | null;
@@ -1262,6 +1328,7 @@ export class ChatBox extends Base {
   set channelOf(v: ChannelOf<ChatMessage> | null | undefined) {
     this._channelOf = typeof v === "function" ? v : null;
     this.renderLog();
+    this.refilterFloats();
   }
   get channelOf(): ChannelOf<ChatMessage> | null {
     return this._channelOf;
@@ -1270,6 +1337,7 @@ export class ChatBox extends Base {
   set channelFilter(v: string | null | undefined) {
     this._channelFilter = typeof v === "string" ? v : null;
     this.renderLog();
+    this.refilterFloats();
   }
   get channelFilter(): string | null {
     return this._channelFilter;
@@ -1363,6 +1431,7 @@ export class ChatBox extends Base {
     else if (name === "hold") this.applyHold(this.hasAttribute("hold"));
     else if (name === "all-pages") this.applyAllPages(this.hasAttribute("all-pages"));
     else if (name === "no-echo-toggle") this.renderMenu();
+    else if (name === "collapsed-count") this.renderLog();
     else this.renderActions();
   }
   private applyAllPages(v: boolean) {
@@ -1990,11 +2059,26 @@ export class ChatBox extends Base {
       this.onColumnScroll();
       if (Date.now() - this.userScrollAt < USER_SCROLL_MS) this.scrolledByUser();
     });
-    // A link in a line: no focus on press, so the box does not re-lay out
-    // (focus changes its layout) between press and click.
+    // A link in a line: no focus on press, so the log does not re-lay out
+    // (collapsed-count shows more lines on focus) between press and click.
     column.addEventListener("mousedown", (e) => {
       if ((e.target as Element | null)?.closest?.("a[href]")) e.preventDefault();
     });
+    // The wheel over the bar scrolls the history first (the input has its
+    // own listener, swipeScrollsLog); at the history's end it goes on to the
+    // page.
+    bar.addEventListener(
+      "wheel",
+      (e) => {
+        const ta = this.els.input;
+        const px = barWheel(e, !!ta && e.composedPath().includes(ta), column);
+        if (!px) return;
+        e.preventDefault();
+        column.scrollTop += px;
+        userScroll();
+      },
+      { passive: false },
+    );
     const userScroll = () => {
       this.userScrollAt = Date.now();
       this.ownPin = false;
@@ -2094,9 +2178,17 @@ export class ChatBox extends Base {
       this.renderAim();
     });
     ta.addEventListener("scroll", () => (this.els.mirror!.scrollTop = ta.scrollTop));
+    // collapsed-count: the log grows or shrinks as focus enters or leaves; stay at its end
+    const refit = () => {
+      if (this.collapsedCount && this.atEnd) requestAnimationFrame(() => this.toEnd());
+    };
+    this.root!.addEventListener("focusin", refit);
+    this.root!.addEventListener("focusout", refit);
     ta.addEventListener("focus", () => {
       this.typing = true;
       this.renderLayout();
+      // Focusing the input lands the history on the newest line.
+      requestAnimationFrame(() => this.toEnd());
     });
     ta.addEventListener("blur", () => {
       this.typing = false;
@@ -2711,8 +2803,12 @@ export class ChatBox extends Base {
     // Reflected on the host so the page can style around it: [open] or [min].
     this.toggleAttribute("open", this.open);
     this.toggleAttribute("min", !this.open);
+    const wasOn = box.classList.contains("on");
     box.classList.toggle("on", this._micActive || this.panel !== "none");
     box.classList.toggle("typing", this.typing && this.open);
+    // collapsed-count: older lines show or hide with "on"; stay at the log's end.
+    if (wasOn !== box.classList.contains("on") && this.collapsedCount && this.atEnd)
+      requestAnimationFrame(() => this.toEnd());
     this.renderAttached();
     this.renderFiles();
     column.hidden = !this.open;
@@ -2986,20 +3082,39 @@ export class ChatBox extends Base {
     return [body, mark];
   }
 
+  /** The history lines the channel filter lets through (all of them without one). */
+  private shownLines(): ChatMessage[] {
+    return filterByChannel(this._messages, this._channelOf, this._channelFilter);
+  }
+  /** False for a line the channel filter hides. */
+  private shownByChannel(m: ChatMessage): boolean {
+    return filterByChannel([m], this._channelOf, this._channelFilter).length > 0;
+  }
   private renderLog() {
     if (!this.root) return;
     const log = this.els.log!;
     log.replaceChildren();
+    const shown = this.shownLines();
     if (this._messages.length === 0) {
       const li = document.createElement("li");
       li.className = "hint";
       li.textContent = this.tr("hintType", { s: DEBOUNCE_MS / 1000 });
       log.append(li);
+    } else if (shown.length === 0) {
+      // A channel filter hides every line: say so, rather than a blank log.
+      const li = document.createElement("li");
+      li.className = "hint filtered";
+      li.setAttribute("role", "status");
+      li.textContent = this.tr("hintFiltered", { c: this._channelFilter ?? "" });
+      log.append(li);
     }
     // A game-style log: one line per message, avatar then text, no bubbles;
     // the time only on hover (long press on a phone).
-    for (const m of filterByChannel(this._messages, this._channelOf, this._channelFilter)) {
+    // collapsed-count counts over the lines shown, so a filter never hides them all.
+    const older = olderLines(shown.length, this.collapsedCount);
+    for (const [i, m] of shown.entries()) {
       const li = document.createElement("li");
+      if (i < older) li.classList.add("older");
       li.dataset.from = m.from;
       li.dataset.id = m.id;
       const who = lineAvatar(m, {
@@ -3094,6 +3209,8 @@ export class ChatBox extends Base {
       (x) => x.dataset.id === want.id,
     );
     if (!li) {
+      // Only hidden by the channel filter: keep the position for when it shows again.
+      if (this._messages.some((m) => m.id === want.id)) return this.toEnd();
       // History is in and the line is not: it is gone, so the newest line it is.
       if (this._messages.length) {
         this.restoreTo = undefined;
@@ -3168,7 +3285,7 @@ export class ChatBox extends Base {
     if (minimizing) {
       this.clearFloats();
       this.frontierOpen = null;
-      const last = minimizeFloat(this._messages, now, this.arrivals.at);
+      const last = minimizeFloat(this.shownLines(), now, this.arrivals.at);
       if (last) this.addFloat(last);
       return;
     }
@@ -3184,6 +3301,8 @@ export class ChatBox extends Base {
     this.els.floats?.replaceChildren();
   }
   private addFloat(m: ChatMessage) {
+    // The channel filter applies minimized too: a hidden channel's line never floats.
+    if (!this.shownByChannel(m)) return;
     const old = this.floats.get(m.id);
     if (old) {
       old.life.cancel();
@@ -3228,7 +3347,18 @@ export class ChatBox extends Base {
     who.className = "who";
     who.style.color = m.from !== "agent" ? "oklch(0.55 0.13 250)" : "oklch(0.55 0.14 150)";
     who.textContent = `${m.from !== "agent" ? this.ui.you : m.label || this.ui.agentName}:`;
-    li.replaceChildren(who, ...this.lineBody(m, () => this.renderFloatTexts()));
+    const ch = channelFor(this._channelOf, m);
+    li.replaceChildren(
+      ...(ch ? [channelTagEl(document, ch)] : []),
+      who,
+      ...this.lineBody(m, () => this.renderFloatTexts()),
+    );
+  }
+  /** channelOf or channelFilter changed: floating lines of a hidden channel go, the rest get their tag. */
+  private refilterFloats() {
+    for (const f of [...this.floats.values()])
+      if (!this.shownByChannel(f.m)) this.dropFloat(f.m.id);
+    this.renderFloatTexts();
   }
   private renderFloatTexts() {
     for (const f of this.floats.values()) this.fillFloat(f.li, f.m);
