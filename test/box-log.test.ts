@@ -1,3 +1,4 @@
+import { UI_EN, uiStrings } from "../src/ui-strings.ts";
 import { describe, expect, it } from "bun:test";
 import { barWheel, ChatBox, olderLines } from "../src/box.ts";
 import type { ChatMessage } from "../src/protocol.ts";
@@ -190,4 +191,8 @@ describe("channels in the log", () => {
     expect(self.floats.size).toBe(0);
     self.clearFloats();
   });
+});
+
+it("the DOM fixture supports default UI-language lookup", () => {
+  expect(uiStrings()).toBe(UI_EN);
 });
