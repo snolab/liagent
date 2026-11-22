@@ -120,6 +120,15 @@
 //     menu (Esc or an outside tap closes it). The page itself is left out
 //     (box.self); hidden when no one else is here; reset on a node change.
 //     Text via textContent only; avatar URLs must be https: or data:image.
+//   - Channels: box.channelOf = (m) => ({ label, color } | null) puts a
+//     【label】 tag before each history line (text only; the colour, a CSS
+//     colour, goes on the tag text with a faint same-colour background, set
+//     as a style property). The host decides the channel (e.g. from m.to /
+//     m.taskPath, root "/" = 世界); null = no tag; `world: true` marks the
+//     world channel. box.channelFilter = label shows that channel's lines
+//     plus the world's, like an old MMO chat (null = all). Which node a line
+//     is sent to stays the host's (the selected channel decides `to`). Setting either re-renders;
+//     neither set = no tags, every line.
 //   - Geometry: the bar's corner radius is derived, never set:
 //     R = border + padding + control / 2 (--liagent-bar-border, 1px;
 //     --liagent-bar-pad, 2px; --liagent-control, 2.125rem). A round control
@@ -235,6 +244,7 @@ import {
 import { TREE_STRINGS_EN, type TreeSource, type TreeStrings, watchTree } from "./tree.ts";
 import { type TreeNode, frontier } from "./state-tree.ts";
 import { type AvatarSrc, type Sender, avatarColors, initialOf, lineAvatar } from "./avatar.ts";
+import { type ChannelOf, channelFor, channelTagEl, filterByChannel } from "./channel-tag.ts";
 import { TREE_CHIPS_CSS, navIndexOf, renderTreeChips } from "./tree-chips.ts";
 import {
   type TreeNavEvent,
@@ -479,6 +489,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .polished[aria-pressed="true"] { opacity: .9; }
 .raw { opacity: .65; }
 .log li.node { border-inline-start: 2px solid var(--node); padding-inline-start: 4px; }
+.log .channel, .float .channel { color: var(--channel, currentColor); background: color-mix(in srgb, var(--channel, currentColor) 14%, transparent); border-radius: 3px; font-weight: 600; margin-inline-end: 2px; }
 .log .sub { display: block; font-size: 10px; line-height: 1.2; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Fixed size whatever loads, so a late picture shifts nothing. */
 .av {
@@ -926,6 +937,8 @@ export class ChatBox extends Base {
   /** The chat state last drawn. */
   private seen?: ChatState;
   private _messages: ChatMessage[] = [];
+  private _channelOf: ChannelOf<ChatMessage> | null = null;
+  private _channelFilter: string | null = null;
   private _live = false;
   private _listeners = 0;
   private _sessions: PairInfo[] = [];
@@ -1375,6 +1388,28 @@ export class ChatBox extends Base {
     if (same(this._user[k], v)) return;
     this._user = { ...this._user, [k]: v };
     this.renderLog();
+  }
+  /**
+   * The host's channel for each history line (e.g. 世界 / 分支 / 報告 from
+   * m.to or m.taskPath): `{ label, color }` puts a 【label】 tag in that
+   * colour before the line, null puts none. Unset: no tags.
+   */
+  set channelOf(v: ChannelOf<ChatMessage> | null | undefined) {
+    this._channelOf = typeof v === "function" ? v : null;
+    this.renderLog();
+    this.refilterFloats();
+  }
+  get channelOf(): ChannelOf<ChatMessage> | null {
+    return this._channelOf;
+  }
+  /** Show the lines whose channelOf(m)?.label equals this, plus world lines ({ world: true }); null shows all. */
+  set channelFilter(v: string | null | undefined) {
+    this._channelFilter = typeof v === "string" ? v : null;
+    this.renderLog();
+    this.refilterFloats();
+  }
+  get channelFilter(): string | null {
+    return this._channelFilter;
   }
   set placeholder(v: string) {
     this._placeholder = v;
@@ -3240,20 +3275,37 @@ export class ChatBox extends Base {
     return [body, mark];
   }
 
+  /** The history lines the channel filter lets through (all of them without one). */
+  private shownLines(): ChatMessage[] {
+    return filterByChannel(this._messages, this._channelOf, this._channelFilter);
+  }
+  /** False for a line the channel filter hides. */
+  private shownByChannel(m: ChatMessage): boolean {
+    return filterByChannel([m], this._channelOf, this._channelFilter).length > 0;
+  }
   private renderLog() {
     if (!this.root) return;
     const log = this.els.log!;
     log.replaceChildren();
+    const shown = this.shownLines();
     if (this._messages.length === 0) {
       const li = document.createElement("li");
       li.className = "hint";
       li.textContent = this.tr("hintType", { s: DEBOUNCE_MS / 1000 });
       log.append(li);
+    } else if (shown.length === 0) {
+      // A channel filter hides every line: say so, rather than a blank log.
+      const li = document.createElement("li");
+      li.className = "hint filtered";
+      li.setAttribute("role", "status");
+      li.textContent = this.tr("hintFiltered", { c: this._channelFilter ?? "" });
+      log.append(li);
     }
     // A game-style log: one line per message, avatar then text, no bubbles;
     // the time only on hover (long press on a phone).
-    const older = olderLines(this._messages.length, this.collapsedCount);
-    for (const [i, m] of this._messages.entries()) {
+    // collapsed-count counts over the lines shown, so a filter never hides them all.
+    const older = olderLines(shown.length, this.collapsedCount);
+    for (const [i, m] of shown.entries()) {
       const li = document.createElement("li");
       if (i < older) li.classList.add("older");
       li.dataset.from = m.from;
@@ -3283,6 +3335,8 @@ export class ChatBox extends Base {
       const sr = document.createElement("span");
       sr.className = "sr";
       sr.textContent = node ? `${who.name} (${node.subtitle}): ` : `${who.name}: `;
+      const ch = channelFor(this._channelOf, m);
+      if (ch) text.append(channelTagEl(document, ch));
       text.append(
         sr,
         ...this.lineBody(m, () => {
@@ -3348,6 +3402,8 @@ export class ChatBox extends Base {
       (x) => x.dataset.id === want.id,
     );
     if (!li) {
+      // Only hidden by the channel filter: keep the position for when it shows again.
+      if (this._messages.some((m) => m.id === want.id)) return this.toEnd();
       // History is in and the line is not: it is gone, so the newest line it is.
       if (this._messages.length) {
         this.restoreTo = undefined;
@@ -3422,7 +3478,7 @@ export class ChatBox extends Base {
     if (minimizing) {
       this.clearFloats();
       this.frontierOpen = null;
-      const last = minimizeFloat(this._messages, now, this.arrivals.at);
+      const last = minimizeFloat(this.shownLines(), now, this.arrivals.at);
       if (last) this.addFloat(last);
       return;
     }
@@ -3438,6 +3494,8 @@ export class ChatBox extends Base {
     this.els.floats?.replaceChildren();
   }
   private addFloat(m: ChatMessage) {
+    // The channel filter applies minimized too: a hidden channel's line never floats.
+    if (!this.shownByChannel(m)) return;
     const old = this.floats.get(m.id);
     if (old) {
       old.life.cancel();
@@ -3482,7 +3540,18 @@ export class ChatBox extends Base {
     who.className = "who";
     who.style.color = m.from !== "agent" ? "oklch(0.55 0.13 250)" : "oklch(0.55 0.14 150)";
     who.textContent = `${m.from !== "agent" ? this.ui.you : m.label || this.ui.agentName}:`;
-    li.replaceChildren(who, ...this.lineBody(m, () => this.renderFloatTexts()));
+    const ch = channelFor(this._channelOf, m);
+    li.replaceChildren(
+      ...(ch ? [channelTagEl(document, ch)] : []),
+      who,
+      ...this.lineBody(m, () => this.renderFloatTexts()),
+    );
+  }
+  /** channelOf or channelFilter changed: floating lines of a hidden channel go, the rest get their tag. */
+  private refilterFloats() {
+    for (const f of [...this.floats.values()])
+      if (!this.shownByChannel(f.m)) this.dropFloat(f.m.id);
+    this.renderFloatTexts();
   }
   private renderFloatTexts() {
     for (const f of this.floats.values()) this.fillFloat(f.li, f.m);
