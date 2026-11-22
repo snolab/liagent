@@ -118,6 +118,17 @@
 //     default (title from record.company / record.row, else title/table/row/
 //     page/selection; key: value detail).
 //     Text only: no HTML from ctx or the hook; icon is a short string. See src/ctx-chip.ts.
+
+//   - Presence (part="presence"): who else is on the box's node, from the
+//     hub's {type:"presence"} snapshot and {type:"presence-delta"} frames
+//     (box.presence(frame); connectHub feeds it and tells the hub the node
+//     via onTarget). A strip centred just above the input row: at most 3
+//     stacked 18px avatars (an agent without a picture gets its lane's
+//     letters), then "+N" only past 3. Hover or focus previews up to 8 with
+//     names and [lane@host]; a click (Enter/Space) opens the whole list as a
+//     menu (Esc or an outside tap closes it). The page itself is left out
+//     (box.self); hidden when no one else is here; reset on a node change.
+//     Text via textContent only; avatar URLs must be https: or data:image.
 //   - Geometry: the bar's corner radius is derived, never set:
 //     R = border + padding + control / 2 (--liagent-bar-border, 1px;
 //     --liagent-bar-pad, 2px; --liagent-control, 2.125rem). A round control
@@ -186,6 +197,18 @@ import {
 } from "./protocol.ts";
 import { type Chat, type ChatState, createChat } from "./core.ts";
 import { pageHint, when } from "./format.ts";
+import { cleanAvatarUrl, type PresenceDelta, type PresenceFrame } from "./protocol.ts";
+import {
+  type PresenceMember,
+  type PresenceState,
+  applyPresence,
+  badgeText,
+  emptyPresence,
+  laneTag,
+  memberLabel,
+  presenceAria,
+  presenceView,
+} from "./presence.ts";
 import { beforeSendEvent } from "./before-send.ts";
 export type { BeforeSendDetail } from "./before-send.ts";
 export type { CtxRenderer, CtxView } from "./ctx-chip.ts";
@@ -446,6 +469,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   max-height: var(--liagent-log-max, 4.4rem); min-height: 3rem; overflow-y: auto; padding: 6px 8px;
   scrollbar-width: none; transition: max-height .15s ease-out;
 }
+/* While the box is in use the history takes the wheel (its gaps too); at rest
+   only the lines do, so the empty space stays click-through. */
+.box:focus-within .column, .box.on .column, .box.typing .column { pointer-events: auto; }
+.box:focus-within .log li, .box.on .log li, .box.typing .log li { pointer-events: auto; }
 .column::-webkit-scrollbar { display: none; }
 .column.wide { max-height: var(--liagent-log-max-wide, 30vh); }
 .column.fade { -webkit-mask-image: linear-gradient(to bottom, transparent, black .9rem); mask-image: linear-gradient(to bottom, transparent, black .9rem); }
@@ -460,6 +487,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .blink { animation: blink 1.6s ease-in-out infinite; }
 @keyframes blink { 50% { opacity: .35; } }
 .log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+/* collapsed-count: older lines hide at rest; in use (focus, a mic, an open panel) they show. */
+:host(:not(:focus-within)) .box:not(.on):not(.typing) .log li.older { display: none; }
 .log li { display: flex; align-items: flex-start; gap: 6px; }
 .text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding-top: 1px; }
 .text a { pointer-events: auto; color: inherit; text-decoration: underline; }
@@ -673,6 +702,21 @@ textarea::placeholder { color: color-mix(in oklch, currentColor 45%, transparent
 @keyframes drain { to { transform: scaleX(0); } }
 .aim { position: absolute; inset-inline-start: 84px; bottom: 100%; margin-bottom: 4px; max-width: calc(100% - 6rem); display: flex; flex-direction: column; align-items: flex-start; gap: 4px; pointer-events: none; }
 .aim > * { pointer-events: auto; }
+.presence { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); margin-bottom: 4px; z-index: 2; display: flex; flex-direction: column-reverse; align-items: center; pointer-events: auto; }
+.presence[hidden] { display: none; }
+.presence .pstack { display: inline-flex; align-items: center; padding: 2px 4px; border-radius: 12px; background: var(--glass); border: 1px solid var(--line); cursor: pointer; }
+.presence .pstack > .pav + .pav { margin-inline-start: -6px; }
+.presence .pstack:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
+.pav { width: 18px; height: 18px; flex: none; border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 600; line-height: 1; background: var(--pav-bg, #888); color: var(--pav-fg, #fff); box-shadow: 0 0 0 1.5px var(--glass, #fff); }
+.pav.agent { border-radius: 5px; }
+.pav img { width: 100%; height: 100%; object-fit: cover; }
+.pmore { margin-inline-start: 4px; font-size: 11px; font-variant-numeric: tabular-nums; opacity: .8; }
+.ppeek { list-style: none; margin: 0 0 4px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--glass); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); text-shadow: none; display: flex; flex-direction: column; gap: 3px; max-width: 16rem; }
+.ppeek[hidden] { display: none; }
+.prow { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+.prow .pname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prow .ptag { opacity: .65; white-space: nowrap; }
+.menu.plist { left: 50%; transform: translateX(-50%); margin-bottom: 30px; max-height: 40vh; }
 .target { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; border: 1px solid var(--node, var(--line)); border-radius: 999px; padding: 0 6px; font-size: 10px; line-height: 16px; background: var(--glass); }
 .target.preview { opacity: .7; }
 .target button { all: unset; cursor: pointer; line-height: 1; }
@@ -741,7 +785,7 @@ ${TREE_CHIPS_CSS}
 [hidden] { display: none !important; }
 `;
 
-type Panel = "none" | "menu" | "tree" | "plus" | "files";
+type Panel = "none" | "menu" | "tree" | "plus" | "files" | "presence";
 /** Where the slotted mic goes (attribute mic-placement). */
 export type MicPlacement = "trailing" | "leading" | "inside" | "hidden";
 /** Where the tree button goes (attribute tree-placement). */
@@ -754,6 +798,44 @@ function iconNode(icon: string | Node | undefined, fallback: string): Node {
   return document.createTextNode(icon || fallback);
 }
 const keepFocus = (e: Event) => e.preventDefault();
+/** True when `el` can still scroll by `dy` (so the wheel is its own). */
+export function wheelScrolls(
+  el: { scrollTop: number; scrollHeight: number; clientHeight: number },
+  dy: number,
+): boolean {
+  if (dy < 0) return el.scrollTop > 0;
+  if (dy > 0) return el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+  return false;
+}
+/**
+ * The wheel over the bar, outside the input: the pixels the history takes, or
+ * 0 to leave the event alone. The input's own listener already handles a wheel
+ * that starts in it (and hands the rest to the log), and a pinch (ctrlKey) or
+ * a mostly horizontal wheel is never the history's.
+ */
+export function barWheel(
+  e: {
+    deltaX: number;
+    deltaY: number;
+    deltaMode: number;
+    ctrlKey: boolean;
+    defaultPrevented: boolean;
+  },
+  inInput: boolean,
+  column: { scrollTop: number; scrollHeight: number; clientHeight: number },
+): number {
+  if (e.defaultPrevented || inInput || e.ctrlKey) return 0;
+  if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return 0;
+  const px = wheelPixels(e.deltaY, e.deltaMode, column.clientHeight);
+  return wheelScrolls(column, px) ? px : 0;
+}
+/**
+ * collapsed-count: how many of `total` lines (the ones the log shows) are
+ * older than the last `keep`, so hidden while the box is not in use.
+ */
+export function olderLines(total: number, keep: number): number {
+  return keep > 0 ? Math.max(0, total - keep) : 0;
+}
 /** The shadow root's parts, by id. */
 type Els = Record<
   | "box"
@@ -763,6 +845,8 @@ type Els = Record<
   | "asks"
   | "rowbox"
   | "aim"
+  | "presence"
+  | "plist"
   | "bar"
   | "mark"
   | "dot"
@@ -803,7 +887,15 @@ type FloatLife = ReturnType<typeof createFloatLife>;
 /** The chat box element. Plain properties in, callbacks out; see the file header. */
 export class ChatBox extends Base {
   static get observedAttributes() {
-    return ["mic-active", "hold", "mic-placement", "tree-placement", "all-pages", "no-echo-toggle"];
+    return [
+      "mic-active",
+      "hold",
+      "mic-placement",
+      "tree-placement",
+      "all-pages",
+      "no-echo-toggle",
+      "collapsed-count",
+    ];
   }
   /**
    * Called with each draft that goes out, and the state-tree node it is
@@ -830,6 +922,8 @@ export class ChatBox extends Base {
   onEnd?: (s: PairInfo) => void;
   /** End was pressed (and, for this page, confirmed) on one of the user's pages in the menu. */
   onEndPage?: (id: string) => void;
+  /** The box aims at another node (setTarget, "@/…", ×): connectHub tells the hub, for presence. */
+  onTarget?: (node: string) => void;
   /**
    * The host's avatar for a line that is not the agent's: its pictures are
    * tried first, its name and id fill in. Return nothing to use the line's
@@ -884,6 +978,8 @@ export class ChatBox extends Base {
   private _nodes: string[] = [];
   /** The node the next line goes to ("/" = the main thread, no chip). */
   private _target = ROOT_NODE;
+  private _presence: PresenceState = emptyPresence(ROOT_NODE);
+  private _presenceHover = false;
   /** Polished lines shown as first heard (their mark tapped). */
   private rawIds = new Set<string>();
   /** The host's actions (+ menu items and bar buttons). */
@@ -1034,6 +1130,7 @@ export class ChatBox extends Base {
     if (changed("pending") || changed("pages") || changed("self") || changed("friend"))
       this.renderAsks();
     if (changed("sessions") || changed("pages") || changed("self")) this.renderMenu();
+    if (changed("self")) this.renderPresence();
     if (changed("busy")) this.renderBusy();
     if (changed("notice") || changed("warning")) this.renderInput();
   }
@@ -1080,9 +1177,34 @@ export class ChatBox extends Base {
   }
   /** Address the next lines to a state-tree node ("/" = back to the main thread). */
   setTarget(path: string) {
+    const was = this._target;
     this._target = nodePath(path) ?? ROOT_NODE;
+    if (this._target !== was) {
+      // Another node: its presence comes fresh from the hub.
+      this._presence = emptyPresence(this._target);
+      if (this.panel === "presence") this.setPanel("none");
+      this.renderPresence();
+      this.onTarget?.(this._target);
+    }
     this.renderAim();
     this.renderPlaceholder();
+  }
+  /**
+   * The hub's presence frame for this box's node (a snapshot replaces the
+   * list, a delta merges; another node's is ignored); null clears it.
+   * Frames should come through parsePresence (connectHub does that).
+   */
+  presence(frame: PresenceFrame | PresenceDelta | null) {
+    this._presence = frame ? applyPresence(this._presence, frame) : emptyPresence(this._target);
+    this.renderPresence();
+  }
+  /** Who else is on the node now (this page left out). */
+  get present(): PresenceMember[] {
+    return presenceView(this._presence.members, this._self).all;
+  }
+  /** Whether the strip shows its hover/focus preview. */
+  get presenceExpanded(): boolean {
+    return this._presenceHover;
   }
   /** Agents listening now (shown in the status). */
   set listeners(v: number) {
@@ -1197,6 +1319,20 @@ export class ChatBox extends Base {
   set micPlacement(v: MicPlacement) {
     this.setAttribute("mic-placement", v);
   }
+  /**
+   * While the box is not in use, show only the last N lines; focus inside it,
+   * a mic on (micActive) or an open panel shows the full log. 0 / unset =
+   * always the full log.
+   * Attribute: collapsed-count.
+   */
+  get collapsedCount(): number {
+    const n = Number(this.getAttribute?.("collapsed-count"));
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  }
+  set collapsedCount(v: number) {
+    if (v > 0) this.setAttribute("collapsed-count", String(Math.floor(v)));
+    else this.removeAttribute("collapsed-count");
+  }
   /** Where the tree button goes. Attribute: tree-placement. */
   get treePlacement(): TreePlacement {
     const v = this.getAttribute?.("tree-placement") as TreePlacement | null;
@@ -1294,9 +1430,9 @@ export class ChatBox extends Base {
    * line goes out with source "stt" (anything typed into it makes it the
    * user's own). It is never sent by itself while a mic is on.
    */
-  setDraft(text: string, opts?: { source?: "stt" }) {
+  setDraft(text: string, opts?: { source?: "stt" | "stream" }) {
     const next = String(text ?? "").slice(0, MAX_CHAT);
-    this.pure = opts?.source === "stt" ? dictatedDraft(this._draft, this.pure, next) : null;
+    this.pure = opts?.source ? dictatedDraft(this._draft, this.pure, next) : null;
     this._draft = next;
     this.settledLen = next.length; // not a typed burst
     this.offline = false;
@@ -1367,6 +1503,7 @@ export class ChatBox extends Base {
     else if (name === "hold") this.applyHold(this.hasAttribute("hold"));
     else if (name === "all-pages") this.applyAllPages(this.hasAttribute("all-pages"));
     else if (name === "no-echo-toggle") this.renderMenu();
+    else if (name === "collapsed-count") this.renderLog();
     else this.renderActions();
   }
   private applyAllPages(v: boolean) {
@@ -1867,9 +2004,11 @@ export class ChatBox extends Base {
 
   /** A tap anywhere outside the menu and the mark closes the menu. */
   private outside = (e: Event) => {
-    if (this.panel !== "menu" && this.panel !== "plus" && this.panel !== "files") return;
+    if (this.panel === "none" || this.panel === "tree") return;
     const path = e.composedPath();
-    if (this.panel === "files") {
+    if (this.panel === "presence") {
+      if (path.includes(this.els.plist!) || path.includes(this.els.presence!)) return;
+    } else if (this.panel === "files") {
       if (path.includes(this.els.fpanel!) || path.includes(this.els.plus!)) return;
     } else if (this.panel === "plus") {
       if (path.includes(this.els.amenu!) || path.includes(this.els.plus!)) return;
@@ -1924,6 +2063,8 @@ export class ChatBox extends Base {
   <div class="filerow" id="filerow" hidden></div>
   <div class="rowbox" id="rowbox">
     <div class="aim" id="aim" hidden></div>
+    <div class="presence" id="presence" part="presence" hidden></div>
+    <div class="menu plist" id="plist" role="menu" hidden></div>
     <div class="bar" id="bar" part="bar">
       <button type="button" class="tap mark" id="mark" title="${this.ui.markHint}">${ICONS.mark}<span class="dot" id="dot"></span></button>
       <div class="cell" id="lead"></div>
@@ -1994,11 +2135,26 @@ export class ChatBox extends Base {
       this.onColumnScroll();
       if (Date.now() - this.userScrollAt < USER_SCROLL_MS) this.scrolledByUser();
     });
-    // A link in a line: no focus on press, so the box does not re-lay out
-    // (focus changes its layout) between press and click.
+    // A link in a line: no focus on press, so the log does not re-lay out
+    // (collapsed-count shows more lines on focus) between press and click.
     column.addEventListener("mousedown", (e) => {
       if ((e.target as Element | null)?.closest?.("a[href]")) e.preventDefault();
     });
+    // The wheel over the bar scrolls the history first (the input has its
+    // own listener, swipeScrollsLog); at the history's end it goes on to the
+    // page.
+    bar.addEventListener(
+      "wheel",
+      (e) => {
+        const ta = this.els.input;
+        const px = barWheel(e, !!ta && e.composedPath().includes(ta), column);
+        if (!px) return;
+        e.preventDefault();
+        column.scrollTop += px;
+        userScroll();
+      },
+      { passive: false },
+    );
     const userScroll = () => {
       this.userScrollAt = Date.now();
       this.ownPin = false;
@@ -2098,9 +2254,17 @@ export class ChatBox extends Base {
       this.renderAim();
     });
     ta.addEventListener("scroll", () => (this.els.mirror!.scrollTop = ta.scrollTop));
+    // collapsed-count: the log grows or shrinks as focus enters or leaves; stay at its end
+    const refit = () => {
+      if (this.collapsedCount && this.atEnd) requestAnimationFrame(() => this.toEnd());
+    };
+    this.root!.addEventListener("focusin", refit);
+    this.root!.addEventListener("focusout", refit);
     ta.addEventListener("focus", () => {
       this.typing = true;
       this.renderLayout();
+      // Focusing the input lands the history on the newest line.
+      requestAnimationFrame(() => this.toEnd());
     });
     ta.addEventListener("blur", () => {
       this.typing = false;
@@ -2647,6 +2811,124 @@ export class ChatBox extends Base {
     aim.hidden = !this.open || !aim.childElementCount;
   }
 
+  /** One small avatar: the picture (checked again), or an initial / lane badge on its colour. */
+  private presenceAvatar(m: PresenceMember): HTMLElement {
+    const el = document.createElement("span");
+    el.className = `pav ${m.kind}`;
+    const badge = () => {
+      const c = avatarColors(`${m.kind}:${m.lane || m.id}`);
+      el.replaceChildren();
+      el.textContent = badgeText(m);
+      el.style.setProperty("--pav-bg", c.bg);
+      el.style.setProperty("--pav-fg", c.fg);
+    };
+    const src = cleanAvatarUrl(m.avatar);
+    if (src) {
+      const img = document.createElement("img");
+      img.alt = "";
+      img.referrerPolicy = "no-referrer";
+      img.decoding = "async";
+      img.addEventListener("error", badge, { once: true });
+      img.src = src;
+      el.append(img);
+    } else badge();
+    return el;
+  }
+  /** A list row: avatar, label, and [lane@host] for an agent. */
+  private presenceRow(m: PresenceMember, item: boolean): HTMLElement {
+    const row = document.createElement(item ? "div" : "li");
+    if (item) {
+      row.setAttribute("role", "menuitem");
+      row.tabIndex = 0;
+    }
+    row.className = "prow";
+    const name = document.createElement("span");
+    name.className = "pname";
+    const tag = laneTag(m);
+    name.textContent = tag && (m.label === tag.slice(1, -1) || m.label === m.lane) ? "" : m.label;
+    row.append(this.presenceAvatar(m), name);
+    if (tag) {
+      const t = document.createElement("span");
+      t.className = "ptag";
+      t.textContent = tag;
+      row.append(t);
+    }
+    return row;
+  }
+  /**
+   * The presence strip (part="presence"), centred above the input row:
+   * up to 3 stacked avatars, "+N" past 3, a preview of up to 8 on hover or
+   * focus, and on click the whole list as a menu. Hidden when no one else is here.
+   */
+  private renderPresence() {
+    const strip = this.els.presence;
+    const list = this.els.plist;
+    if (!strip || !list) return;
+    const v = presenceView(this._presence.members, this._self);
+    strip.hidden = v.hidden;
+    list.hidden = v.hidden || this.panel !== "presence";
+    if (v.hidden) {
+      this._presenceHover = false;
+      strip.replaceChildren();
+      list.replaceChildren();
+      if (this.panel === "presence") this.panel = "none";
+      return;
+    }
+    let btn = strip.querySelector<HTMLButtonElement>("button.pstack");
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "pstack";
+      btn.setAttribute("aria-haspopup", "menu");
+      const set = (on: boolean) => {
+        if (this._presenceHover === on) return;
+        this._presenceHover = on;
+        this.renderPresence();
+      };
+      strip.addEventListener("pointerenter", () => set(true));
+      strip.addEventListener("pointerleave", () => set(false));
+      strip.addEventListener("focusin", () => set(true));
+      strip.addEventListener("focusout", (e) => {
+        if (!strip.contains((e as FocusEvent).relatedTarget as Node | null)) set(false);
+      });
+      btn.addEventListener("click", () =>
+        this.setPanel(this.panel === "presence" ? "none" : "presence"),
+      );
+      strip.append(btn);
+    }
+    const peek = (() => {
+      let p = strip.querySelector<HTMLElement>("ul.ppeek");
+      if (!p) {
+        p = document.createElement("ul");
+        p.className = "ppeek";
+        p.setAttribute("aria-hidden", "true");
+        strip.append(p);
+      }
+      return p;
+    })();
+    btn.setAttribute("aria-label", presenceAria(v.all, this.ui.presenceHere));
+    btn.title = v.all.map(memberLabel).join("\n");
+    btn.setAttribute("aria-expanded", String(this.panel === "presence"));
+    btn.replaceChildren(...v.stack.map((m) => this.presenceAvatar(m)));
+    if (v.more) {
+      const more = document.createElement("span");
+      more.className = "pmore";
+      more.textContent = `+${v.more}`;
+      btn.append(more);
+    }
+    const showPeek = this._presenceHover && this.panel !== "presence";
+    peek.hidden = !showPeek;
+    peek.replaceChildren(...(showPeek ? v.preview.map((m) => this.presenceRow(m, false)) : []));
+    strip.classList.toggle("expanded", showPeek);
+    if (!list.hidden) {
+      const head = document.createElement("span");
+      head.className = "head";
+      head.textContent = `${this.ui.presenceHere} · ${v.all.length}`;
+      list.setAttribute("aria-label", this.ui.presenceHere);
+      list.replaceChildren(head, ...v.all.map((m) => this.presenceRow(m, true)));
+    } else list.replaceChildren();
+  }
+
   // ---- open, minimized, panels ------------------------------------------------
 
   private setOpen(v: boolean) {
@@ -2667,6 +2949,7 @@ export class ChatBox extends Base {
     this.renderMenu();
     this.renderActions();
     this.renderFileList();
+    this.renderPresence();
     if (opening && this.open) this.els.column!.scrollTop = 0;
     requestAnimationFrame?.(() => this.fit());
   }
@@ -2695,6 +2978,7 @@ export class ChatBox extends Base {
     this.renderLog();
     this.renderInput();
     this.renderAim();
+    this.renderPresence();
     this.renderPlaceholder();
     this.renderPartial();
     this.renderTree();
@@ -2715,8 +2999,12 @@ export class ChatBox extends Base {
     // Reflected on the host so the page can style around it: [open] or [min].
     this.toggleAttribute("open", this.open);
     this.toggleAttribute("min", !this.open);
+    const wasOn = box.classList.contains("on");
     box.classList.toggle("on", this._micActive || this.panel !== "none");
     box.classList.toggle("typing", this.typing && this.open);
+    // collapsed-count: older lines show or hide with "on"; stay at the log's end.
+    if (wasOn !== box.classList.contains("on") && this.collapsedCount && this.atEnd)
+      requestAnimationFrame(() => this.toEnd());
     this.renderAttached();
     this.renderFiles();
     column.hidden = !this.open;
@@ -3022,8 +3310,10 @@ export class ChatBox extends Base {
     }
     // A game-style log: one line per message, avatar then text, no bubbles;
     // the time only on hover (long press on a phone).
-    for (const m of this._messages) {
+    const older = olderLines(this._messages.length, this.collapsedCount);
+    for (const [i, m] of this._messages.entries()) {
       const li = document.createElement("li");
+      if (i < older) li.classList.add("older");
       li.dataset.from = m.from;
       li.dataset.id = m.id;
       const who = lineAvatar(m, {

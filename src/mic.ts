@@ -136,13 +136,19 @@ export class UtteranceQueue {
   private head = 0;
   private done = new Map<number, string | null>();
   private partials = new Map<number, string>();
+  private sources = new Map<number, TextSource>();
   add(): number {
     return this.next++;
   }
-  resolve(seq: number, text: string | null) {
-    if (seq < this.head) return;
+  resolve(seq: number, text: string | null, source: TextSource = "stt") {
+    if (seq < this.head || this.done.has(seq)) return;
     this.done.set(seq, text);
+    this.sources.set(seq, source);
     this.partials.delete(seq);
+  }
+  /** Resolved already (a stream's final came, or the upload answered)? */
+  has(seq: number): boolean {
+    return seq < this.head || this.done.has(seq);
   }
   /** Interim text for one not yet resolved (ignored once it is). */
   partial(seq: number, text: string) {
@@ -153,13 +159,24 @@ export class UtteranceQueue {
   }
   /** Text now in order (failed ones are skipped), joined with joinText. */
   take(): string {
-    let out = "";
+    return this.takeRuns()
+      .map((r) => r.text)
+      .reduce(joinText, "");
+  }
+  /** take(), kept apart by source: each run of the same source joined (a stream's text vs an upload's). */
+  takeRuns(): { text: string; source: TextSource }[] {
+    const out: { text: string; source: TextSource }[] = [];
     while (this.done.has(this.head)) {
       const t = this.done.get(this.head);
-      this.done.delete(this.head++);
-      if (t) out = joinText(out, t);
+      const src = this.sources.get(this.head) ?? "stt";
+      this.done.delete(this.head);
+      this.sources.delete(this.head++);
+      if (!t) continue;
+      const last = out.at(-1);
+      if (last && last.source === src) last.text = joinText(last.text, t);
+      else out.push({ text: t.trim(), source: src });
     }
-    return out;
+    return out.filter((r) => r.text);
   }
   /** Utterances still being transcribed. */
   pending(): number {
@@ -386,6 +403,44 @@ export function energyGate(opts: {
 
 export type UploadInfo = { seq: number; durationMs: number; partial: boolean };
 
+/** Where a final transcript came from: the batch upload of the utterance, or a streaming STT. */
+export type TextSource = "stt" | "stream";
+/** No final from a stream this long after the utterance ended: it is uploaded the batch way instead. */
+export const STREAM_FINAL_MS = 8_000;
+
+/**
+ * A streaming STT (createMic `stream`, `<liagent-mic>.streamStt`): one session per utterance, opened when speech
+ * starts and fed every captured 16 kHz frame from the VAD. Its partials show dimmed like the batch partials; its
+ * final covers the utterance, which is then never uploaded. No final within STREAM_FINAL_MS of the end (or open
+ * or send throwing) and the utterance goes the batch way, so nothing is lost.
+ */
+export type StreamStt = {
+  open(cb: {
+    /** Interim text of this utterance so far (replaces the previous one). */
+    onPartial(text: string): void;
+    /** The utterance's final text ("" for nothing said). Later calls are ignored. */
+    onFinal(text: string): void;
+  }): StreamSession;
+};
+export type StreamSession = {
+  /** One frame, 16 kHz mono samples in [-1, 1] (pcm16(frame) gives 16-bit PCM). */
+  send(frame: Float32Array): void;
+  /** The utterance ended: the final is due. */
+  end(): void;
+  /** Dropped (a misfire, the agent started speaking, the mic went off): no final is wanted. */
+  abort?(): void;
+};
+
+/** A frame as 16-bit little-endian PCM, for a streaming STT that wants it. */
+export function pcm16(frame: Float32Array): Int16Array {
+  const out = new Int16Array(frame.length);
+  for (let i = 0; i < frame.length; i++) {
+    const v = Math.max(-1, Math.min(1, frame[i]!));
+    out[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+  }
+  return out;
+}
+
 /**
  * Listening mode. `toggle()` turns it on (loading the VAD, or the fallback if
  * that fails, unless the mic itself was refused) and off. Each utterance is
@@ -399,9 +454,13 @@ export function createMic(d: {
   fallback?: VadFactory;
   upload: (wav: Uint8Array, info: UploadInfo) => Promise<string>;
   onState: (s: MicState) => void;
-  onText: (text: string) => void;
+  onText: (text: string, source?: TextSource) => void;
   onPending: (n: number, interim: string) => void;
   onError?: (e: unknown) => void;
+  /** A streaming STT (read at each utterance's start); its final covers the utterance (StreamStt). */
+  stream?: () => StreamStt | undefined;
+  /** Both final sources pass here before text is emitted (echo checks / recording hooks). */
+  finalize?: (text: string, wav: Uint8Array, info: UploadInfo) => string;
   /** Each frame's speech probability while capturing (a voice output's barge-in judge). */
   onProb?: (prob: number) => void;
   /** Rolling partial chunks for long utterances (on unless false). */
@@ -431,6 +490,29 @@ export function createMic(d: {
   let live: Float32Array[] = [];
   let liveLen = 0;
   let sincePartial = 0;
+  // Keep at most one second before the detector declares speech. Its
+  // threshold needs several frames; those frames belong to the utterance too.
+  let lead: Float32Array[] = [];
+  let leadLen = 0;
+  const clearLead = () => {
+    lead = [];
+    leadLen = 0;
+  };
+  const rememberLead = (frame: Float32Array) => {
+    lead.push(frame.slice());
+    leadLen += frame.length;
+    while (leadLen > RATE && lead.length) {
+      const excess = leadLen - RATE;
+      const first = lead[0]!;
+      if (first.length <= excess) {
+        lead.shift();
+        leadLen -= first.length;
+      } else {
+        lead[0] = first.slice(excess);
+        leadLen -= excess;
+      }
+    }
+  };
   let cur: number | null = null;
   let partialBusy = false;
   let partialsOn = d.partials !== false;
@@ -475,9 +557,83 @@ export function createMic(d: {
   };
   const pending = () => d.onPending(q.pending(), q.interim());
   const report = () => {
-    const t = q.take();
-    if (t) d.onText(t);
+    for (const r of q.takeRuns()) d.onText(r.text, r.source);
     pending();
+  };
+  const finishFinal = (
+    seq: number,
+    text: string,
+    audio: Float32Array,
+    source: TextSource,
+    wav?: Uint8Array,
+  ) => {
+    if (q.has(seq)) return;
+    try {
+      const value = d.finalize
+        ? d.finalize(text, wav ?? encodeWav(audio), {
+            seq,
+            durationMs: toMs(audio.length),
+            partial: false,
+          })
+        : text;
+      q.resolve(seq, value, source);
+    } catch (error) {
+      q.resolve(seq, null, source);
+      fail(error);
+    }
+    report();
+  };
+  /** The streaming session of the utterance being captured, and its seq. */
+  type Streaming = {
+    seq: number;
+    s: StreamSession;
+    final: boolean;
+    text?: string;
+    audio?: Float32Array;
+  };
+  let st: Streaming | null = null;
+  const openStream = () => {
+    const ss = d.stream?.();
+    if (!ss) return;
+    const seq = cur ?? (cur = q.add());
+    const me: Streaming = {
+      seq,
+      s: null as unknown as StreamSession,
+      final: false,
+    };
+    try {
+      me.s = ss.open({
+        onPartial: (text) => {
+          if (me.final || q.has(seq)) return;
+          q.partial(seq, text);
+          pending();
+        },
+        onFinal: (text) => {
+          if (me.final) return;
+          me.final = true;
+          me.text = text;
+          if (me.audio) finishFinal(seq, text, me.audio, "stream");
+          else {
+            q.partial(seq, text);
+            pending();
+          }
+        },
+      });
+      st = me;
+      for (const frame of lead) me.s.send(frame);
+    } catch {
+      abortStream(); // no stream for this one: the batch way
+    }
+  };
+  /** The stream of the current utterance is dropped (misfire, hold, off). */
+  const abortStream = () => {
+    const x = st;
+    st = null;
+    if (!x) return;
+    x.final = true;
+    try {
+      x.s.abort?.();
+    } catch {}
   };
   const resetLive = () => {
     live = [];
@@ -524,6 +680,9 @@ export function createMic(d: {
       resetLive();
       clearTimer(cap);
       cap = setTimer(() => void vad?.flush(), MAX_UTTERANCE_MS);
+      abortStream();
+      openStream();
+      clearLead();
     },
     onFrame(frame, prob) {
       if (g !== gen || held) return;
@@ -533,12 +692,21 @@ export function createMic(d: {
         d.onRecover?.();
       }
       watch();
-      if (state !== "capturing") return;
+      if (state !== "capturing") {
+        if (state === "listening") rememberLead(frame);
+        return;
+      }
       if (prob !== undefined) d.onProb?.(prob);
       live.push(frame);
       liveLen += frame.length;
       sincePartial += frame.length;
-      if (
+      if (st) {
+        try {
+          st.s.send(frame);
+        } catch {
+          abortStream(); // the batch way for this one: its partials and the upload at the end
+        }
+      } else if (
         partialsOn &&
         !partialBusy &&
         liveLen >= toSamples(PARTIAL_MIN_MS) &&
@@ -550,6 +718,8 @@ export function createMic(d: {
       if (g !== gen || held) return;
       clearTimer(cap);
       resetLive();
+      clearLead();
+      abortStream();
       dropCur();
       if (state === "capturing") set("listening");
     },
@@ -563,17 +733,49 @@ export function createMic(d: {
       if (mine) {
         cur = null;
         resetLive();
+        clearLead();
       }
       pending();
-      d.upload(encodeWav(audio), { seq, durationMs: toMs(audio.length), partial: false })
-        .then(
-          (text) => q.resolve(seq, text),
-          (e) => {
-            q.resolve(seq, null);
-            fail(e);
-          },
-        )
-        .finally(report);
+      const batch = () => {
+        const wav = encodeWav(audio);
+        return d
+          .upload(wav, { seq, durationMs: toMs(audio.length), partial: false })
+          .then(
+            (text) => finishFinal(seq, text, audio, "stt", wav),
+            (e) => {
+              q.resolve(seq, null);
+              fail(e);
+            },
+          )
+          .finally(report);
+      };
+      // Streamed: the stream's final covers it; the upload only if no final comes in time.
+      const x = st && st.seq === seq ? st : null;
+      if (mine && x) st = null;
+      if (!x) return void batch();
+      x.audio = audio;
+      try {
+        x.s.end();
+      } catch {
+        if (x.final) {
+          finishFinal(seq, x.text ?? "", audio, "stream");
+          return;
+        }
+        x.final = true;
+        try {
+          x.s.abort?.();
+        } catch {}
+        return void batch();
+      }
+      if (x.final) return finishFinal(seq, x.text ?? "", audio, "stream");
+      setTimer(() => {
+        if (x.final || q.has(seq)) return;
+        x.final = true; // a late final is ignored: the upload answers instead
+        try {
+          x.s.abort?.();
+        } catch {}
+        void batch();
+      }, STREAM_FINAL_MS);
     },
   });
   const quietly = async (f: () => unknown) => {
@@ -635,6 +837,9 @@ export function createMic(d: {
     const reserved = cur;
     cur = null;
     resetLive();
+    clearLead();
+    // The stream of speech under way is dropped: the flush below uploads that speech the batch way.
+    abortStream();
     set("off");
     if (v) {
       // Speech under way when listening stops is still sent.
@@ -642,6 +847,7 @@ export function createMic(d: {
       await quietly(() => v.flush());
       await quietly(() => v.destroy());
     }
+
     if (reserved !== null) {
       cur = reserved;
       dropCur();
@@ -659,6 +865,8 @@ export function createMic(d: {
       tainted = true;
       clearTimer(cap);
       resetLive();
+      clearLead();
+      abortStream();
       dropCur();
       if (state === "capturing") set("listening");
     }

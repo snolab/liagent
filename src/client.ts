@@ -19,13 +19,24 @@
 // (4xxx) or one that never opened (refused). No timer touches the network.
 // A page restored from the back-forward cache (pageshow) is checked again too.
 //
+// Presence: the page names its node (?node= on connect, then {type:"page",
+// node} when box.setTarget moves it); the hub's presence frames go to
+// box.presence (validated by parsePresence).
+//
 // Eval: a hub may send {type:"eval", id, code, to} from an agent the owner
 // approved on this device. It runs only with `evalCode: true`; the result
 // goes back to that agent. Off by default — running code is the site's call.
 
 import type { ChatBox } from "./box.ts";
 import { type Chat, type Transport, type TransportSink, createChat } from "./core.ts";
-import { PAGE_DEBOUNCE_MS, compile, summarize } from "./protocol.ts";
+import {
+  PAGE_DEBOUNCE_MS,
+  type PresenceDelta,
+  type PresenceFrame,
+  compile,
+  parsePresence,
+  summarize,
+} from "./protocol.ts";
 
 /** Hidden this long before the socket is dropped. */
 export const IDLE_MS = 30_000;
@@ -46,6 +57,10 @@ export type HubOptions = {
   wanted?: () => boolean;
   /** Each eval result, for the site's own logging. */
   onEval?: (r: { id: string; ok: boolean } & Record<string, unknown>) => void;
+  /** The node this page is on, sent as ?node= on connect (presence). Default "/". */
+  node?: () => string;
+  /** The hub's presence frames, validated; null when the socket goes down. */
+  onPresence?: (f: PresenceFrame | PresenceDelta | null) => void;
 };
 
 export type HubConnection = {
@@ -71,13 +86,14 @@ const savePageId = (id: string) => {
   } catch {}
 };
 
-function socketUrl(url: string, label: string) {
+function socketUrl(url: string, label: string, node: string) {
   const u = new URL(url, location.href);
   if (u.protocol === "http:") u.protocol = "ws:";
   if (u.protocol === "https:") u.protocol = "wss:";
   u.searchParams.set("label", label);
   const page = readPageId();
   if (page) u.searchParams.set("page", page);
+  if (node && node !== "/") u.searchParams.set("node", node);
   return u.toString();
 }
 
@@ -139,12 +155,16 @@ export function hubTransport(opts: HubOptions): Transport {
   const connect = () => {
     if (ws) return;
     const label = (sentLabel = pageLabel());
-    const sock = new WebSocket(socketUrl(opts.url, label));
+    const initialNode = opts.node?.() ?? "/";
+    const sock = new WebSocket(socketUrl(opts.url, label, initialNode));
     ws = sock;
     sink?.status("connecting");
     sock.onopen = () => {
+      if (ws !== sock) return;
       opened.add(sock);
-      if (ws === sock) sink?.status("live");
+      const latestNode = opts.node?.() ?? "/";
+      if (latestNode !== initialNode) send(sock, { type: "page", node: latestNode });
+      sink?.status("live");
     };
     sock.onmessage = (e) => {
       if (ws !== sock) return;
@@ -157,6 +177,12 @@ export function hubTransport(opts: HubOptions): Transport {
       if (msg?.type === "state" && typeof msg.self === "string")
         // The hub's id for this tab (ours, or a fresh one if ours was taken).
         savePageId(msg.self);
+      if (msg?.type === "presence" || msg?.type === "presence-delta") {
+        // Who else is on this node: parsePresence checks every field.
+        const f = parsePresence(msg);
+        if (f) opts.onPresence?.(f);
+        return;
+      }
       if (msg?.type !== "eval") return sink?.receive(msg);
       if (!opts.evalCode) return;
       if (typeof msg.id !== "string" || typeof msg.to !== "string") return;
@@ -170,6 +196,7 @@ export function hubTransport(opts: HubOptions): Transport {
       if (ws !== sock) return;
       ws = null;
       sink?.status("offline");
+      opts.onPresence?.(null);
       if (opened.has(sock) && e.code < 4000 && wanted()) connect();
     };
   };
@@ -178,7 +205,10 @@ export function hubTransport(opts: HubOptions): Transport {
     clearTimeout(idle);
     const sock = ws;
     ws = null;
-    if (sock) sink?.status("offline");
+    if (sock) {
+      sink?.status("offline");
+      opts.onPresence?.(null);
+    }
     sock?.close();
   };
 
@@ -241,7 +271,15 @@ export function hubTransport(opts: HubOptions): Transport {
 
 /** Drive a <liagent-chat> box from a hub's page socket (see the header). */
 export function connectHub(box: ChatBox, opts: HubOptions): HubConnection {
-  const chat = createChat({ transport: hubTransport(opts) });
+  const transport = hubTransport({
+    ...opts,
+    node: () => box.target,
+    onPresence: (f) => {
+      box.presence?.(f);
+      opts.onPresence?.(f);
+    },
+  });
+  const chat = createChat({ transport });
   box.chat = chat;
   box.onSend = (text, to, o) =>
     chat.send(text, {
@@ -255,6 +293,8 @@ export function connectHub(box: ChatBox, opts: HubOptions): HubConnection {
     void (type === "deny" ? chat.deny(p.pair) : chat.allow(p.pair, answer));
   box.onEnd = (p) => void chat.end(p.pair);
   box.onEndPage = (id) => void chat.endPage(id);
+  // The box aims at another node: the hub moves this page's presence there.
+  box.onTarget = (node) => void transport.send({ type: "page", node });
   chat.start();
   return { update: () => chat.update(), close: () => chat.close(), chat };
 }

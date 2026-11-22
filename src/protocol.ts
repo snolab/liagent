@@ -13,13 +13,17 @@
 //                                                     attachments: files the host stored,
 //                                                     AttachmentRef[], cleanAttachments)
 //                     {type:"allow", pair, pages?: string[] | "all"} | {type:"deny"|"revoke", pair}
-//                     {type:"page", label}            (client-side navigation)
+//                     {type:"page", label?, node?}    (client-side navigation; node: the
+//                                                     node the box aims at, for presence)
 //                     {type:"end-page", id}           (close one of the owner's pages)
 //                     {type:"result", id, to, ok, value?, error?, stack?, ms?}
 //   hub → page        {type:"state", pending, sessions, listeners, pages, self}
 //                     {type:"history", messages} | {type:"chat", message}
 //                     {type:"busy", label, at} | {type:"eval", id, code, to}
 //                     {type:"edited", id, thread, text, raw, edited}   (a voice line polished)
+//                     {type:"presence", node, members, at}             (who else is on the node)
+//                     {type:"presence-delta", node, join?, leave?, at} (members joined, ids left)
+//                                                    (members: PresenceMember[], parsePresence)
 //   agent → hub       {type:"say", text, to?, taskPath?, agentId?, quiet?} | {type:"busy", to?}
 //                     {type:"eval", code, target?} | {type:"grant"|"ungrant", from, to, ms?}
 //                     {type:"edit", id, text}   (polish the owner's latest stt line)
@@ -262,7 +266,8 @@ export type ControllerMessage =
 export type PageMessage =
   | { type: "allow"; pair: string; pages?: string[] | "all"; scope?: "chat" }
   | { type: "deny" | "revoke"; pair: string }
-  | { type: "page"; label: string }
+  /** `label`: client-side navigation; `node`: the node the box now aims at (presence). At least one. */
+  | { type: "page"; label?: string; node?: string }
   | { type: "end-page"; id: string }
   /** `source: "stt"`: sent from the box's mic, unchanged (absent = typed). */
   | {
@@ -392,7 +397,13 @@ export function parsePageMessage(raw: unknown): PageMessage | null {
   }
   if (m.type === "page") {
     const label = typeof m.label === "string" ? m.label.slice(0, MAX_LABEL) : undefined;
-    return label ? { type: "page", label } : null;
+    const node = m.node === undefined ? undefined : nodePath(m.node);
+    if (m.node !== undefined && !node) return null;
+    if (!label && !node) return null;
+    const out: PageMessage = { type: "page" };
+    if (label) out.label = label;
+    if (node) out.node = node;
+    return out;
   }
   if (m.type === "end-page") {
     const id = str(m.id, 64);
@@ -880,4 +891,129 @@ export function cleanAttachments(raw: unknown): AttachmentRef[] | undefined {
     out.push({ id: r.id, name: cleanFileName(r.name), type, size });
   }
   return out.length ? out : undefined;
+}
+
+// ── Presence ──────────────────────────────────────────────────────────────
+// Who else is on the page's current node, pushed by the hub (never polled):
+// a snapshot {type:"presence"} and then deltas {type:"presence-delta"}. The
+// page names its node with {type:"page", node} (and ?node= on connect).
+
+/** Most members a presence frame carries (more are dropped). */
+export const MAX_PRESENCE = 200;
+/** Longest member id / label / lane / host kept. */
+export const MAX_PRESENCE_ID = 64;
+export const MAX_PRESENCE_NAME = 80;
+export const MAX_PRESENCE_TAG = 40;
+/** Longest avatar URL kept (a data:image URL included). */
+export const MAX_AVATAR_URL = 8192;
+
+export type PresenceMember = {
+  /** Stable while present (a page id, a pairing id, a user id). */
+  id: string;
+  kind: "user" | "agent";
+  /** What the strip shows: a user's display name, an agent's "lane@host" (or its label). */
+  label: string;
+  /** An https: URL or a data:image/… URL; anything else is dropped. */
+  avatar?: string;
+  /** An agent's lane and host, shown as [lane@host]. */
+  lane?: string;
+  host?: string;
+};
+export type PresenceFrame = {
+  type: "presence";
+  node: string;
+  members: PresenceMember[];
+  at: number;
+};
+export type PresenceDelta = {
+  type: "presence-delta";
+  node: string;
+  join?: PresenceMember[];
+  leave?: string[];
+  at: number;
+};
+
+/** An avatar URL a box may load: https:, or a raster data:image (no SVG); else undefined. */
+export function cleanAvatarUrl(raw: unknown): string | undefined {
+  if (typeof raw !== "string" || !raw || raw.length > MAX_AVATAR_URL) return undefined;
+  if (/^data:image\/(png|jpeg|gif|webp|avif);base64,[A-Za-z0-9+/=]+$/i.test(raw)) return raw;
+  try {
+    const u = new URL(raw);
+    return u.protocol === "https:" ? u.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** One line of text: control and bidi characters removed, trimmed, cut to `max`. */
+// oxlint-disable-next-line no-control-regex
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+const oneLine = (v: unknown, max: number) =>
+  typeof v === "string"
+    ? v.replace(UNSAFE, "").trim().slice(0, max).trim() || undefined
+    : undefined;
+
+/** A presence member, checked; null when it has no id. `label` falls back to lane, then id. */
+export function cleanMember(raw: unknown): PresenceMember | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const m = raw as Record<string, unknown>;
+  const id = oneLine(m.id, MAX_PRESENCE_ID);
+  if (!id) return null;
+  const kind = m.kind === "agent" ? "agent" : "user";
+  const lane = oneLine(m.lane, MAX_PRESENCE_TAG);
+  const host = oneLine(m.host, MAX_PRESENCE_TAG);
+  const label = oneLine(m.label, MAX_PRESENCE_NAME) ?? lane ?? id;
+  const out: PresenceMember = { id, kind, label };
+  const avatar = cleanAvatarUrl(m.avatar);
+  if (avatar) out.avatar = avatar;
+  if (lane) out.lane = lane;
+  if (host) out.host = host;
+  return out;
+}
+
+const members = (v: unknown): PresenceMember[] => {
+  if (!Array.isArray(v)) return [];
+  const seen = new Set<string>();
+  const out: PresenceMember[] = [];
+  for (const raw of v.slice(0, MAX_PRESENCE)) {
+    const m = cleanMember(raw);
+    if (!m || seen.has(m.id)) continue;
+    seen.add(m.id);
+    out.push(m);
+  }
+  return out;
+};
+
+/** Validate a hub's presence frame (snapshot or delta); anything else is null. */
+export function parsePresence(raw: unknown): PresenceFrame | PresenceDelta | null {
+  const m =
+    typeof raw === "string"
+      ? parse(raw)
+      : raw && typeof raw === "object"
+        ? (raw as Record<string, unknown>)
+        : null;
+  if (!m || (m.type !== "presence" && m.type !== "presence-delta")) return null;
+  const node = nodePath(m.node);
+  if (!node) return null;
+  const at = typeof m.at === "number" && Number.isFinite(m.at) ? m.at : 0;
+  if (m.type === "presence") return { type: "presence", node, members: members(m.members), at };
+  const out: PresenceDelta = { type: "presence-delta", node, at };
+  const join = members(m.join);
+  if (join.length) out.join = join;
+  if (Array.isArray(m.leave)) {
+    const leave = m.leave
+      .slice(0, MAX_PRESENCE)
+      .map((x) => oneLine(x, MAX_PRESENCE_ID))
+      .filter((x): x is string => !!x);
+    if (leave.length) out.leave = leave;
+  }
+  return out;
+}
+
+/** An agent label's lane and host, from "lane@host" at its start ("[writer]@devbox …" too). */
+export function laneHostOf(label: string | undefined): { lane?: string; host?: string } {
+  const m = /^\[?([A-Za-z0-9._-]{1,40})\]?@([A-Za-z0-9._-]{1,40})(?:\s|$)/.exec(
+    (label ?? "").trim(),
+  );
+  return m ? { lane: m[1], host: m[2] } : {};
 }

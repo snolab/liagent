@@ -18,12 +18,20 @@
  * Everything that touches the browser is injected (MicDeps), so this is
  * tested with fakes (test/mic-session.test.ts).
  */
-import { type MicState, type UploadInfo, type Vad, type VadEvents, createMic } from "./mic.ts";
+import {
+  type MicState,
+  type StreamStt,
+  type TextSource,
+  type UploadInfo,
+  type Vad,
+  type VadEvents,
+  createMic,
+} from "./mic.ts";
 
 /** globalThis key of the session. */
 export const MIC_SESSION_KEY = "__liagentMic";
 /** Bumped when the session's shape changes; an older one is migrated, its stream kept. */
-export const MIC_SESSION_V = 2;
+export const MIC_SESSION_V = 3;
 /** sessionStorage: "1" while this tab has the mic on (cleared by an explicit off). */
 export const MIC_ON_KEY = "liagent:mic";
 
@@ -111,6 +119,8 @@ export type MicDeps<C = unknown> = {
   fallback?: (ev: VadEvents, stream: StreamLike, cfg: C | undefined) => Promise<Vad>;
   /** Transcribe one recording (the host's STT endpoint). */
   upload: (wav: Uint8Array, info: UploadInfo, cfg: C | undefined) => Promise<string>;
+  /** A streaming STT for each utterance, if the configuration has one (createMic `stream`). */
+  stream?: (cfg: C | undefined) => StreamStt | undefined;
   onState?: (s: MicState, prev: MicState) => void;
   /** Each final utterance, after its echo check. */
   onUtterance?: (u: Utterance, cfg: C | undefined) => void;
@@ -137,7 +147,7 @@ export type MicDeps<C = unknown> = {
 type Listener = (v: MicView) => void;
 /** Where transcripts go: the attached element. */
 export type MicSink = {
-  onText: (t: string) => void;
+  onText: (t: string, source?: TextSource) => void;
   onPending: (n: number, interim: string) => void;
 };
 
@@ -166,7 +176,7 @@ export function createMicSession<C = unknown>(
   const listeners = new Set<Listener>();
   let sink: MicSink | null = null;
   /** Transcripts that landed while nothing was attached (mid-remount): handed over on attach. */
-  let held: string[] = [];
+  let held: [string, TextSource | undefined][] = [];
   let gumCalls = 0;
   /** Capture held for the agent's voice (the link's state) and for the page's own audio. */
   let voiceHold = false;
@@ -256,11 +266,16 @@ export function createMicSession<C = unknown>(
       : undefined,
     upload: async (wav, info) => {
       const text = await deps.upload(wav, info, cfg);
+      if (!info.partial) return text;
+      const echo = text && voice?.echoCheck ? voice.echoCheck(text, info.durationMs) : undefined;
+      return echo?.drop ? "" : text;
+    },
+    finalize: (text, wav, info) => {
       // The text guard: the agent's own words that leaked past the echo canceller are dropped.
       const echo = text && voice?.echoCheck ? voice.echoCheck(text, info.durationMs) : undefined;
-      if (!info.partial) deps.onUtterance?.({ ...info, wav, text, echo }, cfg);
+      deps.onUtterance?.({ ...info, wav, text, echo }, cfg);
       if (echo?.drop) {
-        if (!info.partial) voice?.echoDropped?.();
+        voice?.echoDropped?.();
         return "";
       }
       return text;
@@ -281,7 +296,8 @@ export function createMicSession<C = unknown>(
       }
       deps.onState?.(s, was);
     },
-    onText: (t) => (sink ? sink.onText(t) : void held.push(t)),
+    onText: (t, src) => (sink ? sink.onText(t, src) : void held.push([t, src])),
+    stream: () => deps.stream?.(cfg),
     onPending: (n, interim) => {
       emit({ pending: n, interim });
       sink?.onPending(n, interim);
@@ -316,7 +332,7 @@ export function createMicSession<C = unknown>(
       sink = s;
       const t = held;
       held = [];
-      for (const x of t) s.onText(x);
+      for (const [x, src] of t) s.onText(x, src);
       s.onPending(view.pending, view.interim);
       return () => {
         if (sink === s) sink = null;
