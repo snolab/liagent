@@ -1323,9 +1323,9 @@ export class ChatBox extends Base {
    * line goes out with source "stt" (anything typed into it makes it the
    * user's own). It is never sent by itself while a mic is on.
    */
-  setDraft(text: string, opts?: { source?: "stt" }) {
+  setDraft(text: string, opts?: { source?: "stt" | "stream" }) {
     const next = String(text ?? "").slice(0, MAX_CHAT);
-    this.pure = opts?.source === "stt" ? dictatedDraft(this._draft, this.pure, next) : null;
+    this.pure = opts?.source ? dictatedDraft(this._draft, this.pure, next) : null;
     this._draft = next;
     this.settledLen = next.length; // not a typed burst
     this.offline = false;

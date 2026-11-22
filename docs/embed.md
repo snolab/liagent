@@ -946,6 +946,46 @@ mic.stt = async (wav, { partial, durationMs }) => {
 Keep provider keys on your server: proxy the request, never put a key in
 the page.
 
+### A streaming STT (optional)
+
+Set `mic.streamStt` to stream each utterance while it is spoken, instead of
+only sending it when it ends. The mic opens one session per utterance when
+speech starts, and feeds it every captured 16 kHz frame from the VAD:
+
+```js
+mic.streamStt = {
+  open({ onPartial, onFinal }) {
+    const ws = new WebSocket("wss://example.com/stt"); // yours
+    ws.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      (m.final ? onFinal : onPartial)(m.text);
+    };
+    return {
+      send: (frame) => ws.send(pcm16(frame)), // Float32Array → 16-bit PCM (exported)
+      end: () => ws.send("end"),
+      abort: () => ws.close(),
+    };
+  },
+};
+```
+
+- `onPartial(text)` shows dimmed, as the batch partials do. No batch partials
+  are sent while a stream runs.
+- `onFinal(text)` covers the utterance: it is not uploaded, and no pending
+  mark is left. Calls after the first are ignored. An early final waits for
+  the VAD's complete recording; it passes the same echo check and
+  `onUtterance` callback as a batch result before reaching the input.
+- Up to one second of frames heard before the VAD declares speech is fed
+  first, so the detector's start threshold does not cut the opening sound.
+  A hold, misfire or mic-off clears this buffer.
+- No final within `STREAM_FINAL_MS` (8 s) of the end, or `open`/`send`
+  throwing: that utterance is uploaded to the STT endpoint as usual. A misfire,
+  the agent starting to speak, or the mic going off calls `abort()`.
+- Text keeps the spoken order across streamed and uploaded utterances. A
+  streamed text reaches the box with `setDraft(next, { source: "stream" })`
+  (`"stt"` for an uploaded one), and `mic-text` carries `detail.source`, so a
+  host can treat it apart, e.g. not auto-send it.
+
 ### Silero VAD (optional)
 
 Out of the box an energy threshold cuts the utterances. It works anywhere
@@ -1005,6 +1045,7 @@ are exported for that.
 | -------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `stt-url` / `sttUrl`             | The STT endpoint (above).                                                                              |
 | `lang` / `lang`                  | The language hint (`?lang=`).                                                                          |
+| `.streamStt`                     | A streaming STT (above): per utterance, fed the VAD's frames; its final covers it.                     |
 | `.stt`                           | `(wav, info) => Promise<string \| { text }>`, used instead of `stt-url`.                               |
 | `.sttHeaders`, `.sttCredentials` | For the default request.                                                                               |
 | `vad-src`, `ort-src` / `.vad`    | Silero's source (above). None: the energy gate.                                                        |
